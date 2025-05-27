@@ -1,2 +1,1 @@
-# ict-trading-oracle
-ICT Trading Bot
+# README file 
