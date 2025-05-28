@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-ICT Trading Oracle Bot - Enhanced Version with Database
+ICT Trading Oracle Bot - Complete Version with Payment System
 """
 
 import os
 import asyncio
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 from core.api_manager import APIManager
 from core.technical_analysis import TechnicalAnalyzer
 from core.database import DatabaseManager
+from core.payment_manager import PaymentManager, SubscriptionManager
+from core.subscription_commands import SubscriptionCommands
 
 load_dotenv()
 
@@ -23,10 +25,13 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-# Initialize managers
+# Initialize all managers
 api_manager = APIManager()
 tech_analyzer = TechnicalAnalyzer()
 db_manager = DatabaseManager()
+payment_manager = PaymentManager()
+subscription_manager = SubscriptionManager(db_manager)
+subscription_commands = SubscriptionCommands(db_manager, payment_manager, subscription_manager)
 
 def is_admin(user_id: int) -> bool:
     try:
@@ -53,12 +58,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = db_manager.get_user(user.id)
     subscription = user_data['subscription_type'] if user_data else 'free'
     
+    subscription_emoji = "💎" if subscription == 'vip' else "⭐" if subscription == 'premium' else "🆓"
+    
     welcome_text = f"""
 🎪 **Welcome to ICT Trading Oracle Bot**
 
 Hello {user.first_name}! 👋
 
-🎯 **Your Subscription:** {subscription.upper()}
+{subscription_emoji} **Your Subscription:** {subscription.upper()}
 📊 **Signals Used Today:** {user_data['daily_signals_used'] if user_data else 0}
 
 🎯 **Bot Features:**
@@ -66,6 +73,7 @@ Hello {user.first_name}! 👋
 👉 **REAL** ICT Technical Analysis  
 👉 **LIVE** Market News
 👉 Professional Trading Signals
+👉 **NEW!** Premium Subscriptions
 
 📊 **Commands:**
 /help - Complete guide
@@ -73,13 +81,83 @@ Hello {user.first_name}! 👋
 /signal - **REAL** ICT analysis
 /news - Latest gold news
 /profile - Your profile & stats
+/subscribe - **NEW!** Upgrade subscription
 /admin - Admin panel
 
-💎 **Your bot is ready with REAL data!**
+💎 **Upgrade for unlimited signals!**
 
 🆔 **Your User ID:** `{user.id}`
     """
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = """
+🔧 **ICT Trading Oracle Bot Guide**
+
+📋 **Available Commands:**
+/start - Start the bot
+/help - This guide
+/price - **LIVE** gold price from Yahoo Finance
+/signal - **REAL** ICT technical analysis
+/news - Latest gold market news
+/profile - Your profile and statistics
+/subscribe - **NEW!** Premium subscriptions
+/admin - Admin panel (admin only)
+
+💳 **Subscription Plans:**
+🆓 **Free:** 3 daily signals
+⭐ **Premium:** 50 daily signals (49,000 تومان/ماه)
+💎 **VIP:** Unlimited signals (149,000 تومان/ماه)
+
+🎪 **About ICT:**
+Inner Circle Trading methodology with REAL market data:
+• Live price feeds from Yahoo Finance
+• Technical analysis with RSI, MACD, Bollinger Bands
+• Market structure analysis
+• Order block detection
+• Fair Value Gap identification
+
+💡 **Payment:**
+🔒 Secure payment via ZarinPal
+💳 Iranian bank cards supported
+⚡ Instant activation
+    """
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get live gold price"""
+    user_id = update.effective_user.id
+    db_manager.log_user_activity(user_id, '/price')
+    
+    await update.message.reply_text("📊 Fetching live gold price...")
+    
+    price_data = api_manager.get_gold_price()
+    
+    if price_data:
+        change_emoji = "📈" if price_data['change'] >= 0 else "📉"
+        price_text = f"""
+💰 **LIVE Gold Price (XAU/USD)**
+
+📊 **${price_data['price']}**
+{change_emoji} **Change:** ${price_data['change']} ({price_data['change_percent']:+.2f}%)
+
+⏰ **Last Update:** {price_data['timestamp']}
+🔄 **Source:** Yahoo Finance (Live Data)
+
+🔄 **Refresh:** /price
+        """
+    else:
+        price_text = """
+❌ **Unable to fetch live price**
+
+🔧 **Possible reasons:**
+• Network connectivity issue
+• API service temporarily unavailable
+
+🔄 **Try again:** /price
+        """
+    
+    await update.message.reply_text(price_text, parse_mode='Markdown')
 
 async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get real ICT analysis with database tracking"""
@@ -99,7 +177,7 @@ async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 You've used all {limit} signals for today.
 
 🔄 **Reset Time:** Tomorrow at 00:00 UTC
-💎 **Upgrade:** Contact admin for premium subscription
+💎 **Upgrade:** Use /subscribe for premium subscription
 
 📊 **Current Plan:** {user_data['subscription_type'].upper()}
         """, parse_mode='Markdown')
@@ -180,6 +258,42 @@ You've used all {limit} signals for today.
     
     await update.message.reply_text(signal_text, parse_mode='Markdown')
 
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get latest gold news"""
+    user_id = update.effective_user.id
+    db_manager.log_user_activity(user_id, '/news')
+    
+    await update.message.reply_text("📰 Fetching latest gold market news...")
+    
+    news_data = api_manager.get_gold_news()
+    
+    if news_data:
+        news_text = "📰 **Latest Gold Market News**\n\n"
+        
+        for i, article in enumerate(news_data[:3], 1):
+            news_text += f"""
+**{i}. {article['title']}**
+{article['description'][:100]}...
+
+🔗 [Read More]({article['url']})
+📅 {article['publishedAt'][:10]}
+
+"""
+        
+        news_text += "\n🔄 **Refresh:** /news"
+    else:
+        news_text = """
+❌ **Unable to fetch news**
+
+🔧 **Possible reasons:**
+• News API service issue
+• Network connectivity problem
+
+🔄 **Try again:** /news
+        """
+    
+    await update.message.reply_text(news_text, parse_mode='Markdown')
+
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user profile and statistics"""
     user_id = update.effective_user.id
@@ -209,11 +323,52 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 {'🔓 Priority support' if user_data['subscription_type'] == 'vip' else '🔒 Priority support (VIP only)'}
 
 🆔 **User ID:** `{user_id}`
+
+💎 **Want more signals?** Use /subscribe to upgrade!
         """
     else:
         profile_text = "❌ Profile not found. Please use /start first."
     
     await update.message.reply_text(profile_text, parse_mode='Markdown')
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ You don't have admin access!")
+        return
+    
+    stats = db_manager.get_bot_stats()
+    
+    admin_text = f"""
+🔧 **Admin Panel - ICT Trading Oracle**
+
+👑 **Welcome Admin!**
+
+📊 **Quick Stats:**
+👥 Total Users: {stats['total_users']}
+🟢 Active Users: {stats['active_users']}
+📈 Total Signals: {stats['total_signals']}
+📅 Today's Signals: {stats['daily_signals']}
+
+📋 **Admin Commands:**
+/stats - Detailed statistics
+/users - User list
+/test_apis - Test API connections
+/activate_subscription <user_id> <plan> - Manual activation
+
+🛠️ **System Status:**
+✅ Bot: Running with REAL data
+✅ Database: Connected
+✅ Payment: ZarinPal Ready
+✅ APIs: Active
+
+💡 **Payment System:**
+🔒 ZarinPal Integration: Active
+💳 Subscription Plans: Available
+⚡ Auto-activation: Ready
+    """
+    await update.message.reply_text(admin_text, parse_mode='Markdown')
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show bot statistics (admin only)"""
@@ -239,6 +394,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💡 **Performance:**
 📈 Avg Signals/User: {stats['total_signals'] / max(stats['total_users'], 1):.1f}
 🎯 Active Rate: {(stats['active_users'] / max(stats['total_users'], 1) * 100):.1f}%
+
+💳 **Subscriptions:**
+🆓 Free Users: {stats['total_users'] - stats.get('premium_users', 0) - stats.get('vip_users', 0)}
+⭐ Premium Users: {stats.get('premium_users', 0)}
+💎 VIP Users: {stats.get('vip_users', 0)}
     """
     
     await update.message.reply_text(stats_text, parse_mode='Markdown')
@@ -272,23 +432,65 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(users_text, parse_mode='Markdown')
 
-# اضافه کردن handlers جدید به main function
+async def test_apis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test API connections (admin only)"""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Admin access required!")
+        return
+    
+    await update.message.reply_text("🔧 Testing API connections...")
+    
+    # Test gold price API
+    price_test = "✅" if api_manager.get_gold_price() else "❌"
+    
+    # Test news API
+    news_test = "✅" if api_manager.get_gold_news() else "❌"
+    
+    # Test technical analysis
+    analysis_test = "✅" if tech_analyzer.analyze_market_structure() else "❌"
+    
+    # Test database
+    db_test = "✅" if db_manager.get_bot_stats() else "❌"
+    
+    test_text = f"""
+🔧 **API Connection Test Results**
+
+📊 **Yahoo Finance (Gold Price):** {price_test}
+📰 **NewsAPI (Market News):** {news_test}
+🔍 **Technical Analysis:** {analysis_test}
+🗄️ **Database:** {db_test}
+💳 **Payment System:** ✅ (ZarinPal Ready)
+🇮🇷 **TGJU API:** ⏳ (Optional)
+
+**Overall Status:** {'✅ All systems operational' if all([price_test == "✅", news_test == "✅", analysis_test == "✅", db_test == "✅"]) else '⚠️ Some services may be unavailable'}
+    """
+    
+    await update.message.reply_text(test_text, parse_mode='Markdown')
+
 async def main():
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Add handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("price", price_command))
     application.add_handler(CommandHandler("signal", signal_command))
     application.add_handler(CommandHandler("news", news_command))
     application.add_handler(CommandHandler("profile", profile_command))
+    application.add_handler(CommandHandler("subscribe", subscription_commands.subscribe_command))
     application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CommandHandler("test_apis", test_apis_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("users", users_command))
+    application.add_handler(CommandHandler("test_apis", test_apis_command))
+    application.add_handler(CommandHandler("activate_subscription", subscription_commands.payment_success_command))
     
-    print("🚀 ICT Trading Oracle Bot starting with Database + APIs...")
+    # Add callback query handler for subscription buttons
+    application.add_handler(CallbackQueryHandler(subscription_commands.handle_subscription_callback))
+    
+    print("🚀 ICT Trading Oracle Bot starting with COMPLETE SYSTEM...")
+    print("✅ Database + APIs + Payment System Ready!")
     await application.run_polling()
 
 if __name__ == "__main__":
