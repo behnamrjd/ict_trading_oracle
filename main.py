@@ -1,164 +1,209 @@
 #!/usr/bin/env python3
 """
-ICT Trading Oracle Bot
+ICT Trading Oracle Bot - Enhanced Version
 """
 
 import os
 import asyncio
 import logging
-import signal
-import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
+from core.api_manager import APIManager
+from core.technical_analysis import TechnicalAnalyzer
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Get Bot Token
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
-if not BOT_TOKEN:
-    logger.error("BOT_TOKEN not found! Please set it in .env file")
-    print("❌ BOT_TOKEN not found! Please add it to .env file")
-    exit(1)
-
-# Global application variable for graceful shutdown
-application = None
+# Initialize API manager and technical analyzer
+api_manager = APIManager()
+tech_analyzer = TechnicalAnalyzer()
 
 def is_admin(user_id: int) -> bool:
-    """Check if user is admin"""
     try:
         from config.settings import ADMIN_IDS
         return user_id in ADMIN_IDS
-    except ImportError:
-        logger.error("Could not import ADMIN_IDS from config.settings")
+    except:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command handler"""
     user = update.effective_user
-    
-    # Log user info for admin setup
-    logger.info(f"User started bot - ID: {user.id}, Username: {user.username}, Name: {user.first_name}")
-    print(f"🔍 User Info - ID: {user.id}, Username: {user.username}, Name: {user.first_name}")
-    
     welcome_text = f"""
 🎪 **Welcome to ICT Trading Oracle Bot**
 
 Hello {user.first_name}! 👋
 
 🎯 **Bot Features:**
-👉 Professional ICT Analysis
-👉 Gold (XAU/USD) Signals
-👉 Advanced AI Integration
+👉 **LIVE** Gold Price Data
+👉 **REAL** ICT Technical Analysis  
+👉 **LIVE** Market News
+👉 Professional Trading Signals
 
 📊 **Commands:**
 /help - Complete guide
-/signal - Get trading signal
-/price - Current gold price
-/admin - Admin panel (if you're admin)
+/price - **LIVE** gold price
+/signal - **REAL** ICT analysis
+/news - Latest gold news
+/admin - Admin panel
 
-💎 **Your bot is ready!**
+💎 **Your bot is ready with REAL data!**
 
 🆔 **Your User ID:** `{user.id}`
     """
-    
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
+async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get live gold price"""
+    await update.message.reply_text("📊 Fetching live gold price...")
+    
+    price_data = api_manager.get_gold_price()
+    
+    if price_data:
+        change_emoji = "📈" if price_data['change'] >= 0 else "📉"
+        price_text = f"""
+💰 **LIVE Gold Price (XAU/USD)**
+
+📊 **${price_data['price']}**
+{change_emoji} **Change:** ${price_data['change']} ({price_data['change_percent']:+.2f}%)
+
+⏰ **Last Update:** {price_data['timestamp']}
+🔄 **Source:** Yahoo Finance (Live Data)
+
+🔄 **Refresh:** /price
+        """
+    else:
+        price_text = """
+❌ **Unable to fetch live price**
+
+🔧 **Possible reasons:**
+• Network connectivity issue
+• API service temporarily unavailable
+
+🔄 **Try again:** /price
+        """
+    
+    await update.message.reply_text(price_text, parse_mode='Markdown')
+
+async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get real ICT analysis"""
+    await update.message.reply_text("🔍 Analyzing market with ICT methodology...")
+    
+    # Get live price
+    price_data = api_manager.get_gold_price()
+    
+    # Get technical analysis
+    analysis = tech_analyzer.analyze_market_structure()
+    
+    if price_data and analysis:
+        signal_emoji = "🟢" if analysis['signal'] == 'BUY' else "🔴" if analysis['signal'] == 'SELL' else "🟡"
+        confidence_stars = "⭐" * min(int(analysis['confidence'] / 20), 5)
+        
+        signal_text = f"""
+📊 **REAL ICT Analysis - Gold (XAU/USD)**
+
+💰 **Current Price:** ${price_data['price']}
+📈 **Change:** ${price_data['change']} ({price_data['change_percent']:+.2f}%)
+
+{signal_emoji} **Signal:** {analysis['signal']}
+🔥 **Confidence:** {analysis['confidence']}%
+{confidence_stars} **Quality:** {'EXCELLENT' if analysis['confidence'] > 80 else 'GOOD' if analysis['confidence'] > 60 else 'FAIR'}
+
+📋 **ICT Analysis:**
+👉 Market Structure: {analysis['market_structure']}
+👉 Order Block: {analysis['order_block']}
+👉 Fair Value Gap: {analysis['fvg_status']}
+👉 RSI: {analysis['rsi']}
+
+⏰ **Analysis Time:** {analysis['analysis_time']}
+🔄 **Refresh:** /signal
+
+⚠️ **Note:** Based on real market data and technical analysis!
+        """
+    else:
+        signal_text = """
+❌ **Unable to generate analysis**
+
+🔧 **Possible reasons:**
+• Market data unavailable
+• Technical analysis service issue
+
+🔄 **Try again:** /signal
+        """
+    
+    await update.message.reply_text(signal_text, parse_mode='Markdown')
+
+async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Get latest gold news"""
+    await update.message.reply_text("📰 Fetching latest gold market news...")
+    
+    news_data = api_manager.get_gold_news()
+    
+    if news_data:
+        news_text = "📰 **Latest Gold Market News**\n\n"
+        
+        for i, article in enumerate(news_data[:3], 1):
+            news_text += f"""
+**{i}. {article['title']}**
+{article['description'][:100]}...
+
+🔗 [Read More]({article['url']})
+📅 {article['publishedAt'][:10]}
+
+"""
+        
+        news_text += "\n🔄 **Refresh:** /news"
+    else:
+        news_text = """
+❌ **Unable to fetch news**
+
+🔧 **Possible reasons:**
+• News API service issue
+• Network connectivity problem
+
+🔄 **Try again:** /news
+        """
+    
+    await update.message.reply_text(news_text, parse_mode='Markdown')
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Help command handler"""
     help_text = """
 🔧 **ICT Trading Oracle Bot Guide**
 
 📋 **Available Commands:**
 /start - Start the bot
 /help - This guide
-/signal - Get ICT signal
-/price - Current gold price
-/status - Bot status
+/price - **LIVE** gold price from Yahoo Finance
+/signal - **REAL** ICT technical analysis
+/news - Latest gold market news
 /admin - Admin panel (admin only)
 
 🎪 **About ICT:**
-Inner Circle Trading is a professional market analysis methodology.
+Inner Circle Trading methodology with REAL market data:
+• Live price feeds
+• Technical analysis with RSI, MACD, Bollinger Bands
+• Market structure analysis
+• Order block detection
+• Fair Value Gap identification
+
+💡 **Data Sources:**
+📊 Prices: Yahoo Finance
+📰 News: NewsAPI
+🔍 Analysis: Real-time technical indicators
     """
-    
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Signal command handler"""
-    signal_text = """
-📊 **ICT Signal - Gold (XAU/USD)**
-
-💰 **Current Price:** $2,350.25
-📈 **Change:** +0.85% (+$19.75)
-
-🎯 **Signal:** BUY
-🔥 **Confidence:** 87%
-⭐ **Quality:** EXCELLENT
-
-📋 **ICT Analysis:**
-👉 Market Structure: BULLISH
-👉 Order Block: Confirmed
-👉 Fair Value Gap: Active
-
-💡 **Entry:** $2,348.00
-🛡️ **Stop Loss:** $2,335.00
-🎯 **Take Profit:** $2,365.00
-
-⚠️ **Note:** This is a test signal!
-    """
-    
-    await update.message.reply_text(signal_text, parse_mode='Markdown')
-
-async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Price command handler"""
-    price_text = """
-💰 **Live Gold Price (XAU/USD)**
-
-📊 **$2,350.25**
-📈 **Change:** +$19.75 (+0.85%)
-
-⏰ **Last Update:** 2 minutes ago
-📅 **Date:** 2025/05/28
-
-🔄 **Refresh:** /price
-    """
-    
-    await update.message.reply_text(price_text, parse_mode='Markdown')
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Status command handler"""
-    status_text = """
-🤖 **ICT Trading Oracle Bot Status**
-
-✅ **Bot:** Active and Ready
-✅ **Server:** Connected
-✅ **Database:** Active
-
-📊 **Statistics:**
-📋 Active Users: 1,250
-📈 Today's Signals: 23
-🕛 Uptime: 99.9%
-
-🕒 **Server Time:** UTC
-    """
-    
-    await update.message.reply_text(status_text, parse_mode='Markdown')
-
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin panel command"""
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
-        await update.message.reply_text("❌ شما دسترسی ادمین ندارید!")
+        await update.message.reply_text("❌ You don't have admin access!")
         return
     
     admin_text = """
@@ -169,123 +214,66 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📊 **Admin Commands:**
 /broadcast - Send message to all users
 /stats - Detailed statistics
-/users - User management
-/signals - Signal management
+/test_apis - Test API connections
 
 🛠️ **System Info:**
-✅ Bot Status: Running
-✅ Database: Connected
-✅ Server: Online
+✅ Bot Status: Running with REAL data
+✅ Yahoo Finance: Connected
+✅ NewsAPI: Connected
+✅ Technical Analysis: Active
 
 💡 **Quick Actions:**
-- Restart bot: Contact system admin
-- View logs: Check server logs
+- Test APIs: /test_apis
+- View system logs: Check server
     """
-    
     await update.message.reply_text(admin_text, parse_mode='Markdown')
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    global application
-    print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
-    if application:
-        asyncio.create_task(application.stop())
-        asyncio.create_task(application.shutdown())
-    sys.exit(0)
+async def test_apis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Test API connections (admin only)"""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Admin access required!")
+        return
+    
+    await update.message.reply_text("🔧 Testing API connections...")
+    
+    # Test gold price API
+    price_test = "✅" if api_manager.get_gold_price() else "❌"
+    
+    # Test news API
+    news_test = "✅" if api_manager.get_gold_news() else "❌"
+    
+    # Test technical analysis
+    analysis_test = "✅" if tech_analyzer.analyze_market_structure() else "❌"
+    
+    test_text = f"""
+🔧 **API Connection Test Results**
+
+📊 **Yahoo Finance (Gold Price):** {price_test}
+📰 **NewsAPI (Market News):** {news_test}
+🔍 **Technical Analysis:** {analysis_test}
+🇮🇷 **TGJU API:** ⏳ (Optional)
+
+**Overall Status:** {'✅ All systems operational' if all([price_test == "✅", news_test == "✅", analysis_test == "✅"]) else '⚠️ Some services may be unavailable'}
+    """
+    
+    await update.message.reply_text(test_text, parse_mode='Markdown')
 
 async def main():
-    """Main function"""
-    global application
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    try:
-        print("🚀 Starting ICT Trading Oracle Bot...")
-        
-        # Create Application
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Add handlers
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("signal", signal_command))
-        application.add_handler(CommandHandler("price", price_command))
-        application.add_handler(CommandHandler("status", status_command))
-        application.add_handler(CommandHandler("admin", admin_command))
-        
-        logger.info("🤖 ICT Trading Oracle Bot starting...")
-        print("✅ Bot handlers registered successfully!")
-        print("🔄 Starting polling...")
-        
-        # Initialize the application
-        await application.initialize()
-        
-        # Start the application
-        await application.start()
-        
-        # Start polling
-        await application.updater.start_polling()
-        
-        print("✅ Bot is now running! Press Ctrl+C to stop.")
-        
-        # Keep the bot running
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            print("\n🛑 Received keyboard interrupt, shutting down...")
-        
-    except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        print(f"❌ Error: {e}")
-    finally:
-        # Graceful shutdown
-        if application:
-            try:
-                print("🔄 Shutting down bot...")
-                await application.updater.stop()
-                await application.stop()
-                await application.shutdown()
-                print("✅ Bot shutdown completed")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
-
-def run_bot():
-    """Run the bot with proper event loop handling"""
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("price", price_command))
+    application.add_handler(CommandHandler("signal", signal_command))
+    application.add_handler(CommandHandler("news", news_command))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("test_apis", test_apis_command))
     
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                loop.run_until_complete(main())
-            except ImportError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(main())
-        else:
-            asyncio.run(main())
-    except RuntimeError as e:
-        if "running event loop" in str(e):
-            try:
-                import nest_asyncio
-                nest_asyncio.apply()
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(main())
-            except ImportError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(main())
-                finally:
-                    loop.close()
-        else:
-            raise
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
-        print(f"❌ Failed to start bot: {e}")
+    print("🚀 ICT Trading Oracle Bot starting with REAL APIs...")
+    await application.run_polling()
 
 if __name__ == "__main__":
-    run_bot()
+    asyncio.run(main())
