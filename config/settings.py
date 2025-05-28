@@ -1,5 +1,3 @@
-# Configuration settings 
-
 """
 Configuration settings for ICT Trading Bot
 """
@@ -30,13 +28,13 @@ DEFAULT_TIMEFRAMES = {
 # Subscription Plans
 SUBSCRIPTION_PLANS = {
     'free': {
-        'name': 'رایگان',
+        'name': 'Free',
         'price': 0,
         'daily_signals': 3,
         'features': ['basic_ict_analysis', 'education', 'price_display']
     },
     'premium': {
-        'name': 'پریمیوم',
+        'name': 'Premium',
         'price': 49,
         'daily_signals': 50,
         'features': ['all_features']
@@ -44,13 +42,17 @@ SUBSCRIPTION_PLANS = {
     'vip': {
         'name': 'VIP',
         'price': 149,
-        'daily_signals': -1,  # نامحدود
+        'daily_signals': -1,  # Unlimited
         'features': ['everything', 'copy_trading', 'personal_consultation']
     }
 }
 
-# Admin Configuration
-ADMIN_IDS = [123456789, 987654321]  # ID های ادمین‌ها
+# Admin Configuration - ADD YOUR USER ID HERE
+ADMIN_IDS = [
+    YOUR_USER_ID_HERE,  # Replace with your actual User ID from /start command
+    123456789,          # Example admin ID
+    987654321           # Example admin ID
+]
 
 # Logging Configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

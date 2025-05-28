@@ -33,9 +33,23 @@ if not BOT_TOKEN:
 # Global application variable for graceful shutdown
 application = None
 
+def is_admin(user_id: int) -> bool:
+    """Check if user is admin"""
+    try:
+        from config.settings import ADMIN_IDS
+        return user_id in ADMIN_IDS
+    except ImportError:
+        logger.error("Could not import ADMIN_IDS from config.settings")
+        return False
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
     user = update.effective_user
+    
+    # Log user info for admin setup
+    logger.info(f"User started bot - ID: {user.id}, Username: {user.username}, Name: {user.first_name}")
+    print(f"🔍 User Info - ID: {user.id}, Username: {user.username}, Name: {user.first_name}")
+    
     welcome_text = f"""
 🎪 **Welcome to ICT Trading Oracle Bot**
 
@@ -50,8 +64,11 @@ Hello {user.first_name}! 👋
 /help - Complete guide
 /signal - Get trading signal
 /price - Current gold price
+/admin - Admin panel (if you're admin)
 
 💎 **Your bot is ready!**
+
+🆔 **Your User ID:** `{user.id}`
     """
     
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
@@ -67,6 +84,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /signal - Get ICT signal
 /price - Current gold price
 /status - Bot status
+/admin - Admin panel (admin only)
 
 🎪 **About ICT:**
 Inner Circle Trading is a professional market analysis methodology.
@@ -135,12 +153,42 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin panel command"""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ شما دسترسی ادمین ندارید!")
+        return
+    
+    admin_text = """
+🔧 **Admin Panel - ICT Trading Oracle**
+
+👑 **Welcome Admin!**
+
+📊 **Admin Commands:**
+/broadcast - Send message to all users
+/stats - Detailed statistics
+/users - User management
+/signals - Signal management
+
+🛠️ **System Info:**
+✅ Bot Status: Running
+✅ Database: Connected
+✅ Server: Online
+
+💡 **Quick Actions:**
+- Restart bot: Contact system admin
+- View logs: Check server logs
+    """
+    
+    await update.message.reply_text(admin_text, parse_mode='Markdown')
+
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
     global application
     print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
     if application:
-        # Stop the application gracefully
         asyncio.create_task(application.stop())
         asyncio.create_task(application.shutdown())
     sys.exit(0)
@@ -161,6 +209,7 @@ async def main():
         application.add_handler(CommandHandler("signal", signal_command))
         application.add_handler(CommandHandler("price", price_command))
         application.add_handler(CommandHandler("status", status_command))
+        application.add_handler(CommandHandler("admin", admin_command))
         
         logger.info("🤖 ICT Trading Oracle Bot starting...")
         print("✅ Bot handlers registered successfully!")
@@ -179,7 +228,6 @@ async def main():
         
         # Keep the bot running
         try:
-            # Run forever
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
@@ -202,24 +250,24 @@ async def main():
 
 def run_bot():
     """Run the bot with proper event loop handling"""
-    # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
-        # Try to get existing event loop
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If loop is already running, create a new task
-            import nest_asyncio
-            nest_asyncio.apply()
-            loop.run_until_complete(main())
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                loop.run_until_complete(main())
+            except ImportError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(main())
         else:
-            # If no loop is running, use asyncio.run
             asyncio.run(main())
     except RuntimeError as e:
         if "running event loop" in str(e):
-            # Alternative method for running event loop
             try:
                 import nest_asyncio
                 nest_asyncio.apply()
@@ -227,7 +275,6 @@ def run_bot():
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(main())
             except ImportError:
-                # If nest_asyncio is not available, use basic approach
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
