@@ -80,6 +80,12 @@ class APIManager:
                 'description': 'Latest Fed decisions affecting precious metals market...',
                 'url': 'https://example.com/news2',
                 'publishedAt': datetime.now().isoformat()
+            },
+            {
+                'title': 'Global Economic Outlook Affects Gold Trading',
+                'description': 'Economic indicators show mixed signals for precious metals...',
+                'url': 'https://example.com/news3',
+                'publishedAt': datetime.now().isoformat()
             }
         ]
     
