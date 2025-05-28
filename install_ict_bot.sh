@@ -1223,10 +1223,10 @@ SUBSCRIPTION_PLANS = {
 
 # Admin Configuration - REPLACE WITH YOUR ACTUAL USER IDS
 ADMIN_IDS = [
-    YOUR_USER_ID_HERE,  # Replace with your actual User ID from /start command
-    123456789,          # Example admin ID
-    987654321           # Example admin ID
+    123456789,  # Replace with your actual User ID from /start command
+    987654321   # Example admin ID
 ]
+
 
 # AI Configuration
 AI_MODEL_PATH = BASE_DIR / "ai_models" / "trained_models"
