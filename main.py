@@ -6,6 +6,8 @@ ICT Trading Oracle Bot
 import os
 import asyncio
 import logging
+import signal
+import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
@@ -27,6 +29,9 @@ if not BOT_TOKEN:
     logger.error("BOT_TOKEN not found! Please set it in .env file")
     print("❌ BOT_TOKEN not found! Please add it to .env file")
     exit(1)
+
+# Global application variable for graceful shutdown
+application = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
@@ -130,8 +135,20 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    global application
+    print(f"\n🛑 Received signal {signum}, shutting down gracefully...")
+    if application:
+        # Stop the application gracefully
+        asyncio.create_task(application.stop())
+        asyncio.create_task(application.shutdown())
+    sys.exit(0)
+
 async def main():
     """Main function"""
+    global application
+    
     try:
         print("🚀 Starting ICT Trading Oracle Bot...")
         
@@ -149,12 +166,79 @@ async def main():
         print("✅ Bot handlers registered successfully!")
         print("🔄 Starting polling...")
         
+        # Initialize the application
+        await application.initialize()
+        
+        # Start the application
+        await application.start()
+        
         # Start polling
-        await application.run_polling(allowed_updates=["message"])
+        await application.updater.start_polling()
+        
+        print("✅ Bot is now running! Press Ctrl+C to stop.")
+        
+        # Keep the bot running
+        try:
+            # Run forever
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            print("\n🛑 Received keyboard interrupt, shutting down...")
         
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         print(f"❌ Error: {e}")
+    finally:
+        # Graceful shutdown
+        if application:
+            try:
+                print("🔄 Shutting down bot...")
+                await application.updater.stop()
+                await application.stop()
+                await application.shutdown()
+                print("✅ Bot shutdown completed")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+
+def run_bot():
+    """Run the bot with proper event loop handling"""
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is already running, create a new task
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop.run_until_complete(main())
+        else:
+            # If no loop is running, use asyncio.run
+            asyncio.run(main())
+    except RuntimeError as e:
+        if "running event loop" in str(e):
+            # Alternative method for running event loop
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(main())
+            except ImportError:
+                # If nest_asyncio is not available, use basic approach
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(main())
+                finally:
+                    loop.close()
+        else:
+            raise
+    except Exception as e:
+        logger.error(f"Failed to start bot: {e}")
+        print(f"❌ Failed to start bot: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    run_bot()
