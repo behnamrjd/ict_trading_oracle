@@ -10,23 +10,55 @@ import ta
 from datetime import datetime, timedelta
 import logging
 import warnings
+import time
+import gc
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 warnings.filterwarnings('ignore')
 
 logger = logging.getLogger(__name__)
 
 class RealICTAnalyzer:
     def __init__(self):
-        self.symbol = "GC=F"  # Gold futures
-        self.timeframes = ['1m', '5m', '15m', '1h', '4h', '1d']
-        self.min_data_points = 50  # Minimum data points for analysis
+def __init__(self):
+    self.symbol = "GC=F"  # Gold futures
+    self.timeframes = ['1m', '5m', '15m', '1h', '4h', '1d']
+    self.min_data_points = 50  # Minimum data points for analysis
+    self.max_retries = 3
+    self.retry_delay = 2
+    
+    # Setup robust HTTP session
+    self.session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=0.3,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    self.session.mount("http://", adapter)
+    self.session.mount("https://", adapter)
+    
+    # Data limits for memory management
+    self.data_limits = {
+        '1m': 200,   # 3+ hours
+        '5m': 500,   # ~2 days  
+        '15m': 500,  # ~5 days
+        '1h': 720,   # 30 days
+        '4h': 720,   # 120 days
+        '1d': 365    # 1 year
+    }
         
-    def get_multi_timeframe_data(self):
-        """Get comprehensive multi-timeframe data"""
-        data = {}
+def get_multi_timeframe_data(self):
+    """Get comprehensive multi-timeframe data with error recovery"""
+    data = {}
+    
+    for attempt in range(self.max_retries):
         try:
             ticker = yf.Ticker(self.symbol)
             
-            # Get different timeframe data with proper periods
+            # Get different timeframe data with proper periods and limits
             timeframe_config = {
                 '1m': {'period': '1d', 'interval': '1m'},
                 '5m': {'period': '5d', 'interval': '5m'},
@@ -37,16 +69,31 @@ class RealICTAnalyzer:
             
             for tf, config in timeframe_config.items():
                 try:
-                    df = ticker.history(period=config['period'], interval=config['interval'])
+                    logger.info(f"📊 Fetching {tf} data (attempt {attempt + 1})...")
+                    
+                    # Get data with timeout
+                    df = ticker.history(
+                        period=config['period'], 
+                        interval=config['interval'],
+                        timeout=30
+                    )
+                    
                     if not df.empty and len(df) >= 10:
+                        # Limit data size for memory management
+                        max_rows = self.data_limits.get(tf, 500)
+                        if len(df) > max_rows:
+                            df = df.tail(max_rows)
+                        
                         data[tf] = df
-                        logger.info(f"✓ {tf} data: {len(df)} candles")
+                        logger.info(f"✅ {tf} data: {len(df)} candles")
                     else:
-                        logger.warning(f"✗ {tf} data: insufficient data")
-                except Exception as e:
-                    logger.error(f"Error getting {tf} data: {e}")
+                        logger.warning(f"⚠️ {tf} data: insufficient data ({len(df)} candles)")
+                        
+                except Exception as tf_error:
+                    logger.error(f"❌ Error getting {tf} data: {tf_error}")
+                    continue
             
-            # Create 4H data by resampling 1H
+            # Create 4H data by resampling 1H if available
             if '1h' in data and not data['1h'].empty:
                 try:
                     data['4h'] = data['1h'].resample('4H').agg({
@@ -56,15 +103,38 @@ class RealICTAnalyzer:
                         'Close': 'last',
                         'Volume': 'sum'
                     }).dropna()
-                    logger.info(f"✓ 4h data: {len(data['4h'])} candles (resampled)")
-                except Exception as e:
-                    logger.error(f"Error creating 4H data: {e}")
+                    
+                    # Limit 4H data
+                    max_4h = self.data_limits.get('4h', 720)
+                    if len(data['4h']) > max_4h:
+                        data['4h'] = data['4h'].tail(max_4h)
+                    
+                    logger.info(f"✅ 4h data: {len(data['4h'])} candles (resampled)")
+                except Exception as resample_error:
+                    logger.error(f"❌ Error creating 4H data: {resample_error}")
             
-            return data
+            # Memory cleanup
+            gc.collect()
             
+            # If we got at least one timeframe, consider it success
+            if data:
+                logger.info(f"🎯 Successfully loaded {len(data)} timeframes")
+                return data
+            else:
+                raise Exception("No timeframe data available")
+                
         except Exception as e:
-            logger.error(f"Error in get_multi_timeframe_data: {e}")
-            return {}
+            logger.error(f"❌ Attempt {attempt + 1} failed: {e}")
+            
+            if attempt < self.max_retries - 1:
+                wait_time = self.retry_delay ** attempt
+                logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+            else:
+                logger.error("❌ All attempts failed, returning empty data")
+                return {}
+    
+    return {}
     
     def identify_market_structure(self, data):
         """Advanced ICT Market Structure Analysis"""
