@@ -309,7 +309,8 @@ You've used all {limit} signals for today.
     
     try:
         # Import the new analyzer
-        tech_analyzer = safe_import_technical_analyzer()
+        from core.technical_analysis import RealICTAnalyzer # Import class directly for type hinting
+        tech_analyzer: RealICTAnalyzer | None = safe_import_technical_analyzer()
         api_manager = safe_import_api_manager()
         
         if not tech_analyzer:
@@ -792,7 +793,8 @@ async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Test Technical Analyzer
     try:
-        tech_analyzer = safe_import_technical_analyzer()
+        from core.technical_analysis import RealICTAnalyzer # Import for type hint
+        tech_analyzer: RealICTAnalyzer | None = safe_import_technical_analyzer()
         if tech_analyzer:
             analysis_result = tech_analyzer.generate_real_ict_signal()
             test_results.append(("Technical Analyzer", "✅" if analysis_result and 'signal' in analysis_result else "❌"))
