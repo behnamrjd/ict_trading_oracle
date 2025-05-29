@@ -1650,12 +1650,15 @@ configuration_editor() {
     echo -e "${CYAN}${BOLD}Configuration Editor Options:${NC}"
     echo "  1. Edit .env file (main configuration)"
     echo "  2. Edit settings.py (admin settings)"
-    echo "  3. View current configuration"
-    echo "  4. Backup configuration"
-    echo "  5. Restore configuration"
-    echo "  6. Back to main menu"
+    echo "  3. Configure Admin IDs (Quick Setup)"
+    echo "  4. Configure Bot Token (Quick Setup)"
+    echo "  5. View current configuration"
+    echo "  6. Backup configuration"
+    echo "  7. Restore configuration"
+    echo "  8. Back to main menu"
     echo ""
-    read -p "Select option (1-6): " config_choice
+    read -p "Select option (1-8): " config_choice
+
     
     case $config_choice in
         1)
@@ -1686,18 +1689,24 @@ configuration_editor() {
             fi
             ;;
         3)
+            configure_admin_ids
+            ;;
+        4)
+            configure_bot_token
+            ;;
+        5)
             print_status "Current configuration:"
             echo ""
             echo -e "${DIM}=== .env file ===${NC}"
             cat "$CONFIG_FILE" | grep -v "^#" | grep -v "^$"
             echo ""
             ;;
-        4)
+        6)
             backup_file="/home/ictbot/backups/.env.backup.$(date +%Y%m%d_%H%M%S)"
             cp "$CONFIG_FILE" "$backup_file"
             print_success "Configuration backed up to: $backup_file"
             ;;
-        5)
+        7)
             print_status "Available backups:"
             ls -la /home/ictbot/backups/.env.backup.* 2>/dev/null || echo "No backups found"
             echo ""
@@ -1709,13 +1718,295 @@ configuration_editor() {
                 print_warning "Restore cancelled or file not found"
             fi
             ;;
-        6)
+        8)
             return
             ;;
         *)
             print_error "Invalid option"
             ;;
     esac
+    
+    read -p "Press Enter to continue..."
+}
+
+# تابع تنظیم Admin IDs
+configure_admin_ids() {
+    print_header "👑 Admin IDs Configuration"
+    
+    local settings_file="$PROJECT_DIR/config/settings.py"
+    
+    if [ ! -f "$settings_file" ]; then
+        print_error "Settings file not found: $settings_file"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # نمایش Admin IDs فعلی
+    echo -e "${CYAN}${BOLD}Current Admin IDs:${NC}"
+    current_admins=$(grep -A 5 "ADMIN_IDS = \[" "$settings_file" | grep -o '[0-9]\+' | tr '\n' ', ' | sed 's/,$//')
+    if [ -n "$current_admins" ]; then
+        echo "  $current_admins"
+    else
+        echo "  No admin IDs configured"
+    fi
+    echo ""
+    
+    echo -e "${YELLOW}${BOLD}Admin ID Management:${NC}"
+    echo "  1. Add new Admin ID"
+    echo "  2. Remove Admin ID"
+    echo "  3. Replace all Admin IDs"
+    echo "  4. Back to configuration menu"
+    echo ""
+    read -p "Select option (1-4): " admin_choice
+    
+    case $admin_choice in
+        1)
+            add_admin_id
+            ;;
+        2)
+            remove_admin_id
+            ;;
+        3)
+            replace_all_admin_ids
+            ;;
+        4)
+            return
+            ;;
+        *)
+            print_error "Invalid option"
+            ;;
+    esac
+}
+
+# تابع اضافه کردن Admin ID
+add_admin_id() {
+    echo ""
+    echo -e "${BLUE}To get your Telegram User ID:${NC}"
+    echo "  1. Start your bot"
+    echo "  2. Send /start command"
+    echo "  3. Your User ID will be shown in the welcome message"
+    echo ""
+    
+    read -p "Enter new Admin ID (numbers only): " new_admin_id
+    
+    # بررسی صحت ورودی
+    if ! [[ "$new_admin_id" =~ ^[0-9]+$ ]]; then
+        print_error "Invalid Admin ID. Please enter numbers only."
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # بررسی تکراری نبودن
+    if grep -q "$new_admin_id" "$PROJECT_DIR/config/settings.py"; then
+        print_warning "Admin ID $new_admin_id already exists"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # اضافه کردن Admin ID جدید
+    print_status "Adding Admin ID: $new_admin_id"
+    
+    # پیدا کردن خط ADMIN_IDS و اضافه کردن ID جدید
+    sed -i "/ADMIN_IDS = \[/,/\]/ {
+        /\]/i\    $new_admin_id,  # Added via control panel
+    }" "$PROJECT_DIR/config/settings.py"
+    
+    print_success "Admin ID $new_admin_id added successfully"
+    
+    # پیشنهاد restart سرویس
+    read -p "Restart service to apply changes? (y/N): " restart_confirm
+    if [[ $restart_confirm =~ ^[Yy]$ ]]; then
+        systemctl restart "$SERVICE_NAME"
+        print_success "Service restarted"
+    fi
+    
+    read -p "Press Enter to continue..."
+}
+
+# تابع حذف Admin ID
+remove_admin_id() {
+    echo ""
+    echo -e "${CYAN}${BOLD}Current Admin IDs:${NC}"
+    
+    # نمایش لیست Admin IDs با شماره
+    local admin_ids=()
+    while IFS= read -r line; do
+        if [[ $line =~ [0-9]+ ]]; then
+            admin_id=$(echo "$line" | grep -o '[0-9]\+')
+            admin_ids+=("$admin_id")
+            echo "  ${#admin_ids[@]}. $admin_id"
+        fi
+    done < <(grep -A 10 "ADMIN_IDS = \[" "$PROJECT_DIR/config/settings.py")
+    
+    if [ ${#admin_ids[@]} -eq 0 ]; then
+        print_error "No admin IDs found"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    echo ""
+    read -p "Select Admin ID to remove (1-${#admin_ids[@]}) or 0 to cancel: " remove_choice
+    
+    if [ "$remove_choice" -eq 0 ] 2>/dev/null; then
+        print_warning "Remove cancelled"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    if [ "$remove_choice" -ge 1 ] && [ "$remove_choice" -le ${#admin_ids[@]} ] 2>/dev/null; then
+        local admin_to_remove="${admin_ids[$((remove_choice-1))]}"
+        
+        # حذف Admin ID
+        print_status "Removing Admin ID: $admin_to_remove"
+        sed -i "/$admin_to_remove/d" "$PROJECT_DIR/config/settings.py"
+        
+        print_success "Admin ID $admin_to_remove removed successfully"
+        
+        # پیشنهاد restart سرویس
+        read -p "Restart service to apply changes? (y/N): " restart_confirm
+        if [[ $restart_confirm =~ ^[Yy]$ ]]; then
+            systemctl restart "$SERVICE_NAME"
+            print_success "Service restarted"
+        fi
+    else
+        print_error "Invalid selection"
+    fi
+    
+    read -p "Press Enter to continue..."
+}
+
+# تابع جایگزینی تمام Admin IDs
+replace_all_admin_ids() {
+    echo ""
+    echo -e "${RED}${BOLD}⚠️ WARNING: This will replace ALL current admin IDs${NC}"
+    echo ""
+    
+    read -p "Are you sure? (y/N): " confirm
+    if [[ ! $confirm =~ ^[Yy]$ ]]; then
+        print_warning "Operation cancelled"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    echo ""
+    echo "Enter Admin IDs (one per line, press Enter twice when done):"
+    
+    local new_admin_ids=()
+    while true; do
+        read -p "Admin ID ${#new_admin_ids[@]}: " admin_id
+        
+        if [ -z "$admin_id" ]; then
+            break
+        fi
+        
+        if [[ "$admin_id" =~ ^[0-9]+$ ]]; then
+            new_admin_ids+=("$admin_id")
+            echo "  ✓ Added: $admin_id"
+        else
+            echo "  ✗ Invalid ID (numbers only): $admin_id"
+        fi
+    done
+    
+    if [ ${#new_admin_ids[@]} -eq 0 ]; then
+        print_error "No valid admin IDs entered"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # ایجاد لیست جدید Admin IDs
+    print_status "Updating admin IDs..."
+    
+    # پیدا کردن و جایگزینی بخش ADMIN_IDS
+    local temp_file=$(mktemp)
+    local in_admin_section=false
+    
+    while IFS= read -r line; do
+        if [[ $line =~ ADMIN_IDS[[:space:]]*=[[:space:]]*\[ ]]; then
+            echo "$line" >> "$temp_file"
+            for admin_id in "${new_admin_ids[@]}"; do
+                echo "    $admin_id,  # Added via control panel" >> "$temp_file"
+            done
+            in_admin_section=true
+        elif [[ $in_admin_section == true && $line =~ \] ]]; then
+            echo "$line" >> "$temp_file"
+            in_admin_section=false
+        elif [[ $in_admin_section == false ]]; then
+            echo "$line" >> "$temp_file"
+        fi
+    done < "$PROJECT_DIR/config/settings.py"
+    
+    # جایگزینی فایل
+    mv "$temp_file" "$PROJECT_DIR/config/settings.py"
+    chown ictbot:ictbot "$PROJECT_DIR/config/settings.py"
+    
+    print_success "Admin IDs updated successfully"
+    echo "New Admin IDs: ${new_admin_ids[*]}"
+    
+    # پیشنهاد restart سرویس
+    read -p "Restart service to apply changes? (y/N): " restart_confirm
+    if [[ $restart_confirm =~ ^[Yy]$ ]]; then
+        systemctl restart "$SERVICE_NAME"
+        print_success "Service restarted"
+    fi
+    
+    read -p "Press Enter to continue..."
+}
+
+# تابع تنظیم Bot Token
+configure_bot_token() {
+    print_header "🤖 Bot Token Configuration"
+    
+    if [ ! -f "$CONFIG_FILE" ]; then
+        print_error "Configuration file not found: $CONFIG_FILE"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # نمایش وضعیت فعلی
+    echo -e "${CYAN}${BOLD}Current Bot Token Status:${NC}"
+    if grep -q "YOUR_REAL_BOT_TOKEN_HERE" "$CONFIG_FILE"; then
+        echo -e "  ${RED}✗ Not configured (using default)${NC}"
+    else
+        local current_token=$(grep "BOT_TOKEN=" "$CONFIG_FILE" | cut -d'=' -f2)
+        local masked_token="${current_token:0:10}...${current_token: -10}"
+        echo -e "  ${GREEN}✓ Configured${NC} ($masked_token)"
+    fi
+    echo ""
+    
+    echo -e "${BLUE}To get your Bot Token:${NC}"
+    echo "  1. Message @BotFather on Telegram"
+    echo "  2. Send /newbot command"
+    echo "  3. Follow instructions to create your bot"
+    echo "  4. Copy the token provided"
+    echo ""
+    
+    read -p "Enter new Bot Token: " new_token
+    
+    # بررسی صحت توکن (فرمت کلی)
+    if [[ ! $new_token =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        print_error "Invalid token format. Bot tokens should be like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+        read -p "Press Enter to continue..."
+        return
+    fi
+    
+    # جایگزینی توکن
+    print_status "Updating bot token..."
+    sed -i "s/BOT_TOKEN=.*/BOT_TOKEN=$new_token/" "$CONFIG_FILE"
+    
+    print_success "Bot token updated successfully"
+    
+    # پیشنهاد restart سرویس
+    read -p "Restart service to apply changes? (y/N): " restart_confirm
+    if [[ $restart_confirm =~ ^[Yy]$ ]]; then
+        systemctl restart "$SERVICE_NAME"
+        sleep 3
+        
+        if systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+            print_success "Service restarted successfully"
+        else
+            print_error "Service failed to start. Check token and try again."
+        fi
+    fi
     
     read -p "Press Enter to continue..."
 }
@@ -3458,10 +3749,15 @@ update_from_github() {
     
     cd "$PROJECT_DIR"
     
-    # Backup current configuration
+     # Backup current configuration AND settings
+    print_status "Backing up configuration and settings..."
     if [ -f ".env" ]; then
-        print_status "Backing up configuration..."
         cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+    fi
+    
+    # بکاپ فایل settings.py
+    if [ -f "config/settings.py" ]; then
+        cp config/settings.py config/settings.py.backup.$(date +%Y%m%d_%H%M%S)
     fi
     
     # Stop service
@@ -3482,6 +3778,23 @@ update_from_github() {
     
     if [ $? -eq 0 ]; then
         print_success "Repository updated successfully"
+        
+        # بازگردانی تنظیمات
+        print_status "Restoring custom configurations..."
+        
+        # بازگردانی .env
+        latest_env_backup=$(ls -t .env.backup.* 2>/dev/null | head -1)
+        if [ -f "$latest_env_backup" ]; then
+            cp "$latest_env_backup" .env
+            print_success "✓ .env configuration restored"
+        fi
+        
+        # بازگردانی settings.py
+        latest_settings_backup=$(ls -t config/settings.py.backup.* 2>/dev/null | head -1)
+        if [ -f "$latest_settings_backup" ]; then
+            cp "$latest_settings_backup" config/settings.py
+            print_success "✓ Admin settings restored"
+        fi
         
         # Update dependencies
         print_status "Updating dependencies..."
