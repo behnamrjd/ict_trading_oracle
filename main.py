@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ICT Trading Oracle Bot - Complete Version with All Features
+ICT Trading Oracle Bot - Complete Version with Error Handling
 """
 
 import os
@@ -11,6 +11,9 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
+
+# Add current directory to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +39,45 @@ if not BOT_TOKEN:
 
 # Global application variable
 application = None
+
+# Import modules with error handling
+try:
+    from config.settings import ADMIN_IDS
+except ImportError as e:
+    logger.error(f"Could not import ADMIN_IDS: {e}")
+    ADMIN_IDS = [123456789]  # Default admin ID
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is admin"""
+    return user_id in ADMIN_IDS
+
+# Safe imports for core modules
+def safe_import_api_manager():
+    """Safely import APIManager"""
+    try:
+        from core.api_manager import APIManager
+        return APIManager()
+    except ImportError as e:
+        logger.error(f"Could not import APIManager: {e}")
+        return None
+
+def safe_import_technical_analyzer():
+    """Safely import TechnicalAnalyzer"""
+    try:
+        from core.technical_analysis import TechnicalAnalyzer
+        return TechnicalAnalyzer()
+    except ImportError as e:
+        logger.error(f"Could not import TechnicalAnalyzer: {e}")
+        return None
+
+def safe_import_database_manager():
+    """Safely import DatabaseManager"""
+    try:
+        from core.database import DatabaseManager
+        return DatabaseManager()
+    except ImportError as e:
+        logger.error(f"Could not import DatabaseManager: {e}")
+        return None
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin"""

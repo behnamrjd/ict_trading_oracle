@@ -1,0 +1,22 @@
+[Unit]
+Description=ICT Trading Oracle Bot v4.0
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ictbot
+Group=ictbot
+WorkingDirectory=/home/ictbot/ict_trading_oracle
+Environment="PATH=/home/ictbot/ict_trading_oracle/venv/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/ictbot/ict_trading_oracle"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/ictbot/ict_trading_oracle/venv/bin/python run.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ictbot
+
+[Install]
+WantedBy=multi-user.target

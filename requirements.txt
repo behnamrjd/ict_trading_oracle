@@ -23,3 +23,4 @@ cryptography==41.0.3
 deep-translator==1.11.4
 reportlab==4.0.4
 nest-asyncio==1.5.8
+setuptools>=40.0.0
