@@ -18,53 +18,61 @@ class APIManager:
     
     def get_gold_price(self):
         """Get live gold price from multiple sources"""
+        # Try method 1: Yahoo Finance with different symbol
         try:
-            # Try method 1: Yahoo Finance with different symbol
-            try:
-                gold = yf.Ticker("XAUUSD=X")  # XAU/USD pair
-                hist = gold.history(period="1d", interval="1m")
+            gold = yf.Ticker("XAUUSD=X")  # XAU/USD pair
+            hist = gold.history(period="1d", interval="1m")
+            
+            if not hist.empty:
+                current_price = hist['Close'].iloc[-1]
+                previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
+                change = current_price - previous_close
+                change_percent = (change / previous_close) * 100
                 
-                if not hist.empty:
-                    current_price = hist['Close'].iloc[-1]
-                    previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else hist['Open'].iloc[-1]
-                    change = current_price - previous_close
-                    change_percent = (change / previous_close) * 100
-                    
+                logger.info("Successfully fetched gold price from yfinance (XAUUSD=X)")
+                return {
+                    'price': round(current_price, 2),
+                    'change': round(change, 2),
+                    'change_percent': round(change_percent, 2),
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+        except Exception as e_yf:
+            logger.warning(f"Failed to get gold price from yfinance (XAUUSD=X): {e_yf}")
+            # Fall through to the next method
+        
+        # Try method 2: Alternative API (metals.live)
+        try:
+            response = requests.get(
+                "https://api.metals.live/v1/spot/gold",
+                timeout=10
+            )
+            if response.status_code == 200:
+                data = response.json()
+                current_price = data.get('price') # Get price, handle None below
+                
+                if current_price is not None:
+                    # Estimate change if not provided by this API
+                    # This API might provide more data, adjust as needed if it does.
+                    change = current_price * random.uniform(-0.005, 0.005) # Simulate small change
+                    change_percent = (change / current_price) * 100 if current_price else 0
+                    logger.info("Successfully fetched gold price from api.metals.live")
                     return {
                         'price': round(current_price, 2),
-                        'change': round(change, 2),
+                        'change': round(change, 2), 
                         'change_percent': round(change_percent, 2),
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     }
-            except:
-                pass
-            
-            # Try method 2: Alternative API
-            try:
-                # Using a real-time gold API
-                response = requests.get(
-                    "https://api.metals.live/v1/spot/gold",
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    current_price = data.get('price', 3280)  # Current realistic price
-                    
-                    return {
-                        'price': round(current_price, 2),
-                        'change': round(current_price * 0.0025, 2),  # Estimated change
-                        'change_percent': 0.25,
-                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    }
-            except:
-                pass
-            
-            # Fallback with realistic current price
-            return self._get_realistic_price()
-            
-        except Exception as e:
-            logger.error(f"Error fetching gold price: {e}")
-            return self._get_realistic_price()
+                else:
+                    logger.warning("api.metals.live response OK, but no price data.")
+            else:
+                logger.warning(f"Failed to get gold price from api.metals.live: Status {response.status_code}")
+        except Exception as e_metals:
+            logger.warning(f"Error connecting to api.metals.live: {e_metals}")
+            # Fall through to the fallback
+        
+        # Fallback with realistic current price if other methods failed
+        logger.warning("All primary gold price sources failed. Using fallback price.")
+        return self._get_realistic_price()
     
     def _get_realistic_price(self):
         """Realistic current gold price based on market data"""

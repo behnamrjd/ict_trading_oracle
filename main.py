@@ -12,19 +12,34 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 
+# Attempt to import logging settings first
+try:
+    from config.settings import LOG_LEVEL, LOG_FILE_PATH_CONFIG
+except ImportError:
+    # Fallback if config.settings is not available or structured differently initially
+    LOG_LEVEL = "INFO"
+    # Define a fallback log path if import fails, though main setup below also has one.
+    # This helps if logger is used before full setup in rare cases.
+    LOG_FILE_PATH_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "ict_trading_fallback.log") 
+
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Load environment variables
+# Path setup for logging (directory creation part)
+# Ensure the directory for the log file exists. LOG_FILE_PATH_CONFIG is an absolute path string.
+LOG_DIR_FROM_CONFIG = os.path.dirname(LOG_FILE_PATH_CONFIG)
+os.makedirs(LOG_DIR_FROM_CONFIG, exist_ok=True)
+
+# Load environment variables early
 load_dotenv()
 
-# Setup logging
+# Setup logging using imported settings
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.INFO), # Use getattr for safety
     handlers=[
-        logging.FileHandler('logs/ict_trading.log'),
-        logging.StreamHandler()
+        logging.FileHandler(LOG_FILE_PATH_CONFIG),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
@@ -33,12 +48,13 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN not found! Please set it in .env file")
-    print("❌ BOT_TOKEN not found! Please add it to .env file")
+    # This print is for immediate user feedback if logs aren't set up or seen
+    print("❌ BOT_TOKEN not found in .env file. Please set it and try again.")
+    # Logger might not be fully configured yet, but try to log critical error.
+    logging.getLogger(__name__).critical("BOT_TOKEN not found! Please set it in .env file")
     exit(1)
 
-# Global application variable
-application = None
+# Global application variable removed, will be handled in main()
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin"""
@@ -60,12 +76,12 @@ def safe_import_api_manager():
         return None
 
 def safe_import_technical_analyzer():
-    """Safely import TechnicalAnalyzer"""
+    """Safely import RealICTAnalyzer"""
     try:
-        from core.technical_analysis import TechnicalAnalyzer
-        return TechnicalAnalyzer()
+        from core.technical_analysis import RealICTAnalyzer
+        return RealICTAnalyzer()
     except ImportError as e:
-        logger.error(f"Could not import TechnicalAnalyzer: {e}")
+        logger.error(f"Could not import RealICTAnalyzer: {e}")
         return None
 
 def safe_import_database_manager():
@@ -79,6 +95,10 @@ def safe_import_database_manager():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
+    if not update.message or not update.effective_user:
+        logger.warning("Start command received without message or effective_user.")
+        return
+
     user = update.effective_user
     
     # Add user to database
@@ -149,12 +169,15 @@ Hello {user.first_name}! 👋
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command handler"""
+    if not update.message or not update.effective_user:
+        logger.warning("Help command received without message or effective_user.")
+        return
     try:
         db_manager = safe_import_database_manager()
         if db_manager:
             db_manager.log_user_activity(update.effective_user.id, '/help')
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to log user activity for /help: {e}")
     
     help_text = """
 🔧 **ICT Trading Oracle Bot Guide**
@@ -168,12 +191,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /profile - Your profile and statistics
 /subscribe - Premium subscriptions
 /admin - Admin panel (admin only)
-/backtest - 7-day performance analysis (admin only)
+/backtest [days] [trades_per_day] - Performance analysis (admin only, params optional)
 
 💳 **Subscription Plans:**
 🆓 **Free:** 3 daily signals
 ⭐ **Premium:** 50 daily signals (49,000 تومان/ماه)
-💎 **VIP:** Unlimited signals (149,000 تومان/ماه)
+💎 **VIP:** Unlimited signals
 
 🎪 **About ICT:**
 Inner Circle Trading methodology with REAL market data:
@@ -198,14 +221,17 @@ Inner Circle Trading methodology with REAL market data:
 
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get live gold price"""
+    if not update.message or not update.effective_user:
+        logger.warning("Price command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     try:
         db_manager = safe_import_database_manager()
         if db_manager:
             db_manager.log_user_activity(user_id, '/price')
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to log user activity for /price: {e}")
     
     await update.message.reply_text("📊 Fetching live gold price...")
     
@@ -247,6 +273,9 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get real ICT analysis with advanced 25+ indicators"""
+    if not update.message or not update.effective_user:
+        logger.warning("Signal command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     # Check if user can receive signals
@@ -271,7 +300,9 @@ You've used all {limit} signals for today.
                 """, parse_mode='Markdown')
                 return
     except Exception as e:
-        logger.error(f"Database error in signal command: {e}")
+        logger.warning(f"Database error in signal command (checking limits or logging activity): {e}")
+        # Decide if we should return or proceed with caution if DB is down
+        # For now, we'll let it proceed, but signal saving might fail.
     
     # Show analysis progress
     progress_msg = await update.message.reply_text("🔍 **Starting Advanced ICT Analysis...**\n\n⏳ Fetching multi-timeframe data...")
@@ -409,141 +440,19 @@ You've used all {limit} signals for today.
 💡 **Note:** This is an advanced analysis system. Some errors are expected during development.
         """, parse_mode='Markdown')
 
-⚠️ **Daily Signal Limit Reached**
-
-You've used all {limit} signals for today.
-
-🔄 **Reset Time:** Tomorrow at 00:00 UTC
-💎 **Upgrade:** Use /subscribe for premium subscription
-
-📊 **Current Plan:** {user_data['subscription_type'].upper() if user_data else 'FREE'}
-                """, parse_mode='Markdown')
-                return
-    except Exception as e:
-        logger.error(f"Database error in signal command: {e}")
-    
-    await update.message.reply_text("🔍 Analyzing market with ICT methodology...")
-    
-    try:
-        api_manager = safe_import_api_manager()
-        tech_analyzer = safe_import_technical_analyzer()
-        
-        if not api_manager or not tech_analyzer:
-            await update.message.reply_text("❌ **Error:** Core modules not available")
-            return
-        
-        # Get live price and analysis
-        price_data = api_manager.get_gold_price()
-        analysis = tech_analyzer.analyze_market_structure()
-        
-        if price_data and analysis:
-            # Save signal to database
-            try:
-                if db_manager:
-                    signal_data = {
-                        'signal_type': 'ICT',
-                        'symbol': 'GOLD',
-                        'price': price_data['price'],
-                        'signal_direction': analysis['signal'],
-                        'confidence': analysis['confidence'],
-                        'entry_price': price_data['price'],
-                        'stop_loss': price_data['price'] * 0.99,  # 1% stop loss
-                        'take_profit': price_data['price'] * 1.02,  # 2% take profit
-                        'market_structure': analysis['market_structure'],
-                        'order_block': analysis['order_block'],
-                        'fvg_status': analysis['fvg_status'],
-                        'rsi_value': analysis['rsi']
-                    }
-                    
-                    signal_id = db_manager.add_signal(signal_data)
-                    if signal_id and not is_admin(user_id):
-                        db_manager.record_user_signal(user_id, signal_id)
-            except Exception as e:
-                logger.error(f"Error saving signal to database: {e}")
-            
-            signal_emoji = "🟢" if analysis['signal'] == 'BUY' else "🔴" if analysis['signal'] == 'SELL' else "🟡"
-            confidence_stars = "⭐" * min(int(analysis['confidence'] / 20), 5)
-            
-            # Get updated user stats
-            try:
-                if db_manager:
-                    user_data = db_manager.get_user(user_id)
-                    signals_used = user_data['daily_signals_used'] if user_data else 0
-                    total_signals = user_data['total_signals_received'] if user_data else 0
-                    subscription_type = user_data['subscription_type'] if user_data else 'free'
-                else:
-                    signals_used = 0
-                    total_signals = 0
-                    subscription_type = 'free'
-            except:
-                signals_used = 0
-                total_signals = 0
-                subscription_type = 'free'
-            
-            # Calculate stop loss and take profit
-            entry_price = price_data['price']
-            if analysis['signal'] == 'BUY':
-                stop_loss = entry_price * 0.985  # 1.5% stop loss
-                take_profit = entry_price * 1.025  # 2.5% take profit
-            else:
-                stop_loss = entry_price * 1.015  # 1.5% stop loss
-                take_profit = entry_price * 0.975  # 2.5% take profit
-            
-            signal_text = f"""
-📊 **ICT Analysis - Gold (XAU/USD)**
-
-💰 **Current Price:** ${price_data['price']}
-📈 **Change:** ${price_data['change']} ({price_data['change_percent']:+.2f}%)
-
-{signal_emoji} **Signal:** {analysis['signal']}
-🔥 **Confidence:** {analysis['confidence']}%
-{confidence_stars} **Quality:** {'EXCELLENT' if analysis['confidence'] > 80 else 'GOOD' if analysis['confidence'] > 60 else 'FAIR'}
-
-📋 **ICT Analysis:**
-👉 Market Structure: {analysis['market_structure']}
-👉 Order Block: {analysis['order_block']}
-👉 Fair Value Gap: {analysis['fvg_status']}
-👉 RSI: {analysis['rsi']}
-
-💡 **Entry:** ${entry_price}
-🛡️ **Stop Loss:** ${stop_loss:.2f}
-🎯 **Take Profit:** ${take_profit:.2f}
-
-📊 **Your Stats:**
-🔢 Signals Used Today: {signals_used}/{'∞' if subscription_type == 'vip' or is_admin(user_id) else '50' if subscription_type == 'premium' else '3'}
-📈 Total Signals: {total_signals}
-
-⏰ **Analysis Time:** {analysis['analysis_time']}
-🔄 **Refresh:** /signal
-
-⚠️ **Note:** Based on real market data and technical analysis!
-            """
-        else:
-            signal_text = """
-❌ **Unable to generate analysis**
-
-🔧 **Possible reasons:**
-• Market data unavailable
-• Technical analysis service issue
-
-🔄 **Try again:** /signal
-            """
-    except Exception as e:
-        logger.error(f"Error in signal command: {e}")
-        signal_text = f"❌ **Error generating signal:** {str(e)}"
-    
-    await update.message.reply_text(signal_text, parse_mode='Markdown')
-
 async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get latest gold news"""
+    if not update.message or not update.effective_user:
+        logger.warning("News command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     try:
         db_manager = safe_import_database_manager()
         if db_manager:
             db_manager.log_user_activity(user_id, '/news')
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to log user activity for /news: {e}")
     
     await update.message.reply_text("📰 Fetching latest gold market news...")
     
@@ -586,6 +495,9 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user profile and statistics"""
+    if not update.message or not update.effective_user:
+        logger.warning("Profile command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     try:
@@ -638,6 +550,9 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show subscription options"""
+    if not update.message or not update.effective_user:
+        logger.warning("Subscribe command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     try:
@@ -648,8 +563,9 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_plan = user_data['subscription_type'] if user_data else 'free'
         else:
             current_plan = 'free'
-    except:
-        current_plan = 'free'
+    except Exception as e:
+        logger.warning(f"Failed to get user data or log activity for /subscribe: {e}")
+        current_plan = 'free' # Default to free if DB interaction fails
     
     if is_admin(user_id):
         current_plan = 'admin'
@@ -697,6 +613,9 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin panel command"""
+    if not update.message or not update.effective_user:
+        logger.warning("Admin command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
@@ -738,7 +657,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /stats - Detailed statistics
 /users - User management
 /test_system - Run system tests
-/backtest - 7-day performance analysis
+/backtest [days] [trades_per_day] - Performance analysis (admin only, params optional)
 
 🛠️ **System Status:**
 ✅ Bot: Running with ALL features
@@ -754,10 +673,13 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⚡ Performance: Optimized
 📈 Backtest: 7-day analysis available
     """
-    await update.message.reply_text(admin_text)
+    await update.message.reply_text(admin_text, parse_mode='Markdown')
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show detailed statistics (admin only)"""
+    if not update.message or not update.effective_user:
+        logger.warning("Stats command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
@@ -804,6 +726,9 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show user list (admin only)"""
+    if not update.message or not update.effective_user:
+        logger.warning("Users command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
@@ -841,6 +766,9 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Test system components (admin only)"""
+    if not update.message or not update.effective_user:
+        logger.warning("Test_system command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
@@ -866,8 +794,8 @@ async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         tech_analyzer = safe_import_technical_analyzer()
         if tech_analyzer:
-            analysis = tech_analyzer.analyze_market_structure()
-            test_results.append(("Technical Analyzer", "✅" if analysis else "❌"))
+            analysis_result = tech_analyzer.generate_real_ict_signal()
+            test_results.append(("Technical Analyzer", "✅" if analysis_result and 'signal' in analysis_result else "❌"))
         else:
             test_results.append(("Technical Analyzer", "❌ Import failed"))
     except Exception as e:
@@ -907,20 +835,65 @@ async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(test_text, parse_mode='Markdown')
 
 async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Run 7-day backtest (admin only)"""
+    """Run configurable backtest (admin only)"""
+    if not update.message or not update.effective_user:
+        logger.warning("Backtest command received without message or effective_user.")
+        return
     user_id = update.effective_user.id
     
     if not is_admin(user_id):
         await update.message.reply_text("❌ Admin access required!")
         return
+
+    days_to_backtest = None
+    signals_per_day_val = None
+    args_error = False
+
+    if context.args:
+        if len(context.args) >= 1:
+            try:
+                days_to_backtest = int(context.args[0])
+                if days_to_backtest <= 0:
+                    await update.message.reply_text("❌ Number of days must be a positive integer.")
+                    args_error = True
+            except ValueError:
+                await update.message.reply_text("❌ Invalid format for days. Please provide an integer.")
+                args_error = True
+        
+        if len(context.args) >= 2 and not args_error:
+            try:
+                signals_per_day_val = int(context.args[1])
+                if signals_per_day_val <= 0:
+                    await update.message.reply_text("❌ Signals per day must be a positive integer.")
+                    args_error = True
+            except ValueError:
+                await update.message.reply_text("❌ Invalid format for signals per day. Please provide an integer.")
+                args_error = True
+        
+        if len(context.args) > 2 and not args_error:
+            await update.message.reply_text("⚠️ Too many arguments. Usage: /backtest [days] [signals_per_day]")
+            args_error = True
+            
+    if args_error:
+        return # Stop processing if there was an error with arguments
+
+    # Determine message based on provided arguments
+    if days_to_backtest and signals_per_day_val:
+        start_message = f"🚀 Starting {days_to_backtest}-day backtest with {signals_per_day_val} signals/day... This may take a moment..."
+    elif days_to_backtest:
+        start_message = f"🚀 Starting {days_to_backtest}-day backtest (default signals/day)... This may take a moment..."
+    else:
+        # Defaults will be used from config by BacktestAnalyzer if None is passed
+        start_message = "🚀 Starting backtest with default settings... This may take a moment..."
     
-    await update.message.reply_text("🚀 Starting 7-day backtest... This may take a moment...")
+    await update.message.reply_text(start_message)
     
     try:
         from backtest.backtest_analyzer import BacktestAnalyzer
         
         backtest = BacktestAnalyzer()
-        results = backtest.run_full_backtest()
+        # Pass parameters to run_full_backtest; it will use its defaults if these are None
+        results = backtest.run_full_backtest(days=days_to_backtest, signals_per_day=signals_per_day_val)
         
         # Send report
         await update.message.reply_text(results['report'], parse_mode='Markdown')
@@ -948,17 +921,13 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in backtest command: {e}")
         await update.message.reply_text(f"❌ **Backtest Error:** {str(e)}")
 
-async def main():
-    """Main function with proper event loop handling"""
-    global application
-    
+async def main_bot_logic(application: Application, stop_event: asyncio.Event):
+    """Initializes and runs the bot, waiting for a stop signal."""
     try:
-        print("🚀 Starting ICT Trading Oracle Bot...")
-        
-        # Create Application
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Add handlers
+        logger.info("🤖 ICT Trading Oracle Bot preparing to start...")
+        print("🚀 Initializing ICT Trading Oracle Bot...")
+
+        # Add handlers (moved here to have application instance)
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("price", price_command))
@@ -972,74 +941,101 @@ async def main():
         application.add_handler(CommandHandler("test_system", test_system_command))
         application.add_handler(CommandHandler("backtest", backtest_command))
         
-        logger.info("🤖 ICT Trading Oracle Bot starting...")
+        logger.info("🤖 Bot command handlers registered.")
         print("✅ Bot handlers registered successfully!")
-        print("🔄 Starting polling...")
         
-        # Initialize the application
         await application.initialize()
-        
-        # Start the application
+        logger.info("🤖 Application initialized.")
+        print("🔄 Starting application and polling...")
         await application.start()
+
+        if not application.updater:
+            logger.critical("Application updater is None after start. Cannot start polling.")
+            print("❌ Critical error: Application updater is missing.")
+            return # or raise an exception
+            
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         
-        # Start polling
-        await application.updater.start_polling()
+        logger.info("✅ Bot is now running! Waiting for stop signal (Ctrl+C or SIGTERM).")
+        print("✅ Bot is now running! Press Ctrl+C to stop.")
         
-        print("✅ Bot is now running!")
-        
-        # Keep the bot running
-        try:
-            while True:
-                await asyncio.sleep(1)
-        except KeyboardInterrupt:
-            print("\n🛑 Received keyboard interrupt, shutting down...")
-        
+        await stop_event.wait() # Keep running until stop_event is set
+
     except Exception as e:
-        logger.error(f"Error starting bot: {e}")
-        print(f"❌ Error: {e}")
+        logger.critical(f"Critical error during bot setup or runtime: {e}", exc_info=True)
+        print(f"❌ Critical error in bot logic: {e}")
     finally:
-        # Graceful shutdown
+        logger.info("Initiating shutdown sequence in main_bot_logic finally block...")
+        print("\nInitiating shutdown sequence...")
         if application:
-            try:
-                print("🔄 Shutting down bot...")
+            if application.updater and application.updater.running:
+                logger.info("Stopping updater...")
+                print("Stopping updater...")
                 await application.updater.stop()
-                await application.stop()
-                await application.shutdown()
-                print("✅ Bot shutdown completed")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
+                logger.info("Updater stopped.")
+                print("Updater stopped.")
+            # No need to call application.stop() separately if updater.stop() is called
+            logger.info("Shutting down application...")
+            print("Shutting down application...")
+            await application.shutdown()
+            logger.info("Application shutdown complete.")
+            print("Application shutdown complete.")
+        logger.info("Shutdown sequence finished.")
+        print("✅ Bot shut down gracefully.")
 
-def run_bot():
-    """Run the bot with proper event loop handling for systemd"""
-    try:
-        # Install nest_asyncio to handle running event loops
-        import nest_asyncio
-        nest_asyncio.apply()
-        
-        # Get the current event loop
-        loop = asyncio.get_event_loop()
-        
-        # Run the main function
-        loop.run_until_complete(main())
-        
-    except ImportError:
-        # If nest_asyncio is not available, use alternative method
+async def main():
+    """Main entry point for the bot."""
+    # Re-check BOT_TOKEN to satisfy linter, though it's checked above.
+    # If the initial check passed, BOT_TOKEN is guaranteed to be a string here.
+    if not BOT_TOKEN: 
+        logger.critical("BOT_TOKEN became None unexpectedly before app build. This should not happen.")
+        print("CRITICAL ERROR: BOT_TOKEN is None before application build.")
+        return
+
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def signal_handler(sig, frame=None): # Frame is optional for add_signal_handler
+        logger.info(f"Received signal {sig.name if isinstance(sig, signal.Signals) else sig}, initiating shutdown...")
+        print(f"\nReceived signal {sig.name if isinstance(sig, signal.Signals) else sig}, initiating shutdown...")
+        if not stop_event.is_set():
+            loop.call_soon_threadsafe(stop_event.set)
+
+    for sig_val in (signal.SIGINT, signal.SIGTERM):
+        # For Windows, SIGTERM might not be available or work as expected.
+        # SIGINT (Ctrl+C) is generally reliable.
         try:
-            # Try to create a new event loop
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(main())
-        except Exception as e:
-            logger.error(f"Failed to start bot: {e}")
-            print(f"❌ Failed to start bot: {e}")
-        finally:
-            try:
-                loop.close()
-            except:
-                pass
-    except Exception as e:
-        logger.error(f"Failed to start bot: {e}")
-        print(f"❌ Failed to start bot: {e}")
+            loop.add_signal_handler(sig_val, signal_handler, sig_val)
+        except (AttributeError, NotImplementedError, ValueError) as e:
+            # ValueError: signal handler must be signal.SIG_DFL, signal.SIG_IGN, or a callable object
+            # NotImplementedError: signals are not supported on this platform (e.g. certain Windows asyncio loops)
+            # AttributeError: 'ProactorEventLoop' object has no attribute 'add_signal_handler' (older Python on Windows)
+            logger.warning(f"Could not set signal handler for {sig_val.name if isinstance(sig_val, signal.Signals) else sig_val}: {e}. Relying on KeyboardInterrupt.")
+            # For Windows, KeyboardInterrupt is often the primary way to stop console apps.
+            # The asyncio.run() wrapper handles KeyboardInterrupt well.
 
-if __name__ == "__main__":
-    run_bot()
+    await main_bot_logic(application, stop_event)
+
+# This function is no longer needed as its logic is integrated into main() and main_bot_logic()
+# def handle_exit(signum=None, frame=None):
+#     """Handle exit signals gracefully."""
+#     logger.info("🛑 Bot shutting down...")
+#     print("\n🛑 Bot shutting down...")
+#     # Async shutdown logic is now in main_bot_logic's finally block
+#     print("✅ Bot shut down gracefully.")
+#     sys.exit(0) # sys.exit should be avoided in async code if possible; natural exit is better.
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received at top level. Exiting.")
+        print("\n🛑 Bot process interrupted by user (KeyboardInterrupt). Exiting.")
+    except Exception as e:
+        logger.critical(f"Critical error preventing bot from running: {e}", exc_info=True)
+        print(f"❌ Top-level critical error: {e}")
+    finally:
+        logger.info("Bot application process finished.")
+        print("Bot application process finished.")

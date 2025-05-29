@@ -7,13 +7,16 @@ import json
 import os
 from datetime import datetime, timedelta
 import logging
+# Import settings
+from config.settings import SUBSCRIPTION_PLANS, ZARINPAL_SANDBOX, PAYMENT_CALLBACK_DOMAIN
 
 logger = logging.getLogger(__name__)
 
 class PaymentManager:
     def __init__(self):
         self.merchant_id = os.getenv('ZARINPAL_MERCHANT_ID', 'YOUR_ZARINPAL_MERCHANT')
-        self.sandbox = True  # Set to False for production
+        self.sandbox = ZARINPAL_SANDBOX # Use from settings
+        self.callback_domain = PAYMENT_CALLBACK_DOMAIN # Use from settings
         
         if self.sandbox:
             self.base_url = "https://sandbox.zarinpal.com/pg/rest/WebGate/"
@@ -23,7 +26,8 @@ class PaymentManager:
     def create_payment_request(self, amount, description, user_id, subscription_type):
         """Create payment request"""
         try:
-            callback_url = f"https://yourdomain.com/payment/callback/{user_id}"
+            # Use the configured callback domain
+            callback_url = f"https://{self.callback_domain}/payment/callback/{user_id}/{subscription_type}/{amount}" 
             
             data = {
                 "MerchantID": self.merchant_id,
@@ -116,22 +120,7 @@ class PaymentManager:
 class SubscriptionManager:
     def __init__(self, db_manager):
         self.db = db_manager
-        self.plans = {
-            'premium': {
-                'name': 'Premium',
-                'price': 49000,  # 49,000 Toman
-                'duration_days': 30,
-                'daily_signals': 50,
-                'features': ['50 daily signals', 'Premium analysis', 'Email support']
-            },
-            'vip': {
-                'name': 'VIP',
-                'price': 149000,  # 149,000 Toman
-                'duration_days': 30,
-                'daily_signals': -1,  # Unlimited
-                'features': ['Unlimited signals', 'Premium analysis', 'Priority support', 'Custom alerts']
-            }
-        }
+        self.plans = SUBSCRIPTION_PLANS # Use from settings
     
     def get_plan_info(self, plan_type):
         """Get subscription plan information"""

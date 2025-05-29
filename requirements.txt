@@ -1,26 +1,53 @@
+# Core Bot Dependencies
 python-telegram-bot==20.7
-yfinance==0.2.18
+python-dotenv==1.0.0
+requests==2.31.0
+aiohttp==3.8.5
+nest-asyncio==1.5.8
+
+# Data Analysis & Technical Indicators
 pandas==2.0.3
 numpy==1.24.3
 ta==0.10.2
+yfinance==0.2.18
 scikit-learn==1.3.0
-xgboost==1.7.6
-torch==2.0.1
+
+# Visualization
 matplotlib==3.7.2
 seaborn==0.12.2
+
+# AI/ML (Optional)
+xgboost==1.7.6
+torch==2.0.1
+
+# Text Processing
 vaderSentiment==3.3.2
 feedparser==6.0.10
 textblob==0.17.1
+
+# Utilities
 pytz==2023.3
-flask==2.3.3
-flask-login==0.6.2
-requests==2.31.0
-aiohttp==3.8.5
-python-dotenv==1.0.0
-schedule==1.2.0
 psutil==5.9.5
 cryptography==41.0.3
 deep-translator==1.11.4
 reportlab==4.0.4
-nest-asyncio==1.5.8
+schedule==1.2.0
+
+# Web Framework (Optional)
+flask==2.3.3
+flask-login==0.6.2
+
+# Essential
 setuptools>=40.0.0
+wheel>=0.40.0
+
+# Network & Retry
+urllib3==1.26.16
+requests-oauthlib==1.3.1
+
+# Database
+sqlite3  # Built-in with Python
+
+# Development
+pytest==7.4.0
+black==23.7.0

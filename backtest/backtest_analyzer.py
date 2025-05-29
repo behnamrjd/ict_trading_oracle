@@ -9,32 +9,34 @@ from datetime import datetime, timedelta
 import logging
 import json
 import os
+from config.settings import BACKTEST_DAYS, SIGNALS_PER_DAY
 
 logger = logging.getLogger(__name__)
 
 class BacktestAnalyzer:
     def __init__(self):
         self.symbol = "GC=F"  # Gold futures
-        self.signals_per_day = 10
-        self.backtest_days = 7
+        self.signals_per_day = SIGNALS_PER_DAY
+        self.backtest_days = BACKTEST_DAYS
         
-    def get_historical_data(self, days=7):
+    def get_historical_data(self, days=None):
         """Get historical gold price data"""
+        current_backtest_days = days if days is not None else self.backtest_days
         try:
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=days + 2)  # Extra days for data
+            start_date = end_date - timedelta(days=current_backtest_days + 2)  # Extra days for data
             
             ticker = yf.Ticker(self.symbol)
             data = ticker.history(start=start_date, end=end_date, interval="1h")
             
             if data.empty:
                 # Generate realistic sample data if API fails
-                return self._generate_sample_data(days)
+                return self._generate_sample_data(current_backtest_days)
             
             return data
         except Exception as e:
             logger.error(f"Error fetching historical data: {e}")
-            return self._generate_sample_data(days)
+            return self._generate_sample_data(current_backtest_days)
     
     def _generate_sample_data(self, days):
         """Generate realistic sample data for backtesting"""
@@ -74,15 +76,18 @@ class BacktestAnalyzer:
         
         return df
     
-    def generate_signals(self, historical_data):
-        """Generate ICT signals for the past 7 days"""
+    def generate_signals(self, historical_data, signals_per_day=None, for_days=None):
+        """Generate ICT signals for the past specified days"""
         signals = []
         
-        # Get the last 7 days of data
+        # Use instance variables if parameters are not provided
+        num_days_to_generate = for_days if for_days is not None else self.backtest_days
+        num_signals_per_day = signals_per_day if signals_per_day is not None else self.signals_per_day
+
         end_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         
-        for day in range(7):
-            signal_date = end_date - timedelta(days=day)
+        for day_offset in range(num_days_to_generate):
+            signal_date = end_date - timedelta(days=day_offset)
             
             # Get data for this day
             day_data = historical_data[
@@ -92,8 +97,8 @@ class BacktestAnalyzer:
             if day_data.empty:
                 continue
                 
-            # Generate 10 signals for this day
-            for signal_num in range(self.signals_per_day):
+            # Generate signals for this day
+            for signal_num in range(num_signals_per_day):
                 signal_time = signal_date + timedelta(hours=signal_num + 8)  # 8 AM to 6 PM
                 
                 # Find closest price data
@@ -104,7 +109,7 @@ class BacktestAnalyzer:
                     entry_price = day_data['Close'].mean()
                 
                 # Generate ICT-style signal
-                signal = self._generate_ict_signal(entry_price, signal_time, day, signal_num)
+                signal = self._generate_ict_signal(entry_price, signal_time, day_offset, signal_num)
                 signals.append(signal)
         
         return pd.DataFrame(signals)
@@ -294,11 +299,12 @@ class BacktestAnalyzer:
             'daily_stats': daily_stats.to_dict('index')
         }
     
-    def generate_report(self, signals_df, analysis):
+    def generate_report(self, signals_df, analysis, for_days=None):
         """Generate detailed backtest report"""
+        report_period_days = for_days if for_days is not None else self.backtest_days
         report = f"""
-📊 **ICT Trading Oracle - 7-Day Backtest Report**
-📅 **Period:** {(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')} to {datetime.now().strftime('%Y-%m-%d')}
+📊 **ICT Trading Oracle - {report_period_days}-Day Backtest Report**
+📅 **Period:** {(datetime.now() - timedelta(days=report_period_days)).strftime('%Y-%m-%d')} to {datetime.now().strftime('%Y-%m-%d')}
 
 🎯 **Overall Performance:**
 📈 Total Signals: {analysis['total_signals']}
@@ -324,17 +330,24 @@ class BacktestAnalyzer:
         
         return report
     
-    def run_full_backtest(self):
-        """Run complete 7-day backtest"""
-        print("🚀 Starting 7-Day ICT Trading Oracle Backtest...")
+    def run_full_backtest(self, days=None, signals_per_day=None):
+        """Run complete backtest for specified days and signals per day"""
+        
+        # Determine days and signals_per_day to use for this run
+        current_backtest_days = days if days is not None else self.backtest_days
+        current_signals_per_day = signals_per_day if signals_per_day is not None else self.signals_per_day
+
+        report_title_days = current_backtest_days # For the report title
+
+        print(f"🚀 Starting {current_backtest_days}-Day ICT Trading Oracle Backtest ({current_signals_per_day} signals/day)...")
         
         # Step 1: Get historical data
-        print("📊 Fetching historical gold price data...")
-        historical_data = self.get_historical_data(self.backtest_days)
+        print(f"📊 Fetching historical gold price data for {current_backtest_days} days...")
+        historical_data = self.get_historical_data(days=current_backtest_days)
         
         # Step 2: Generate signals
-        print("🎯 Generating ICT signals for past 7 days...")
-        signals_df = self.generate_signals(historical_data)
+        print(f"🎯 Generating ICT signals for past {current_backtest_days} days ({current_signals_per_day} signals/day)...")
+        signals_df = self.generate_signals(historical_data, signals_per_day=current_signals_per_day, for_days=current_backtest_days)
         
         # Step 3: Backtest signals
         print("🔍 Backtesting signals against historical data...")
@@ -345,7 +358,7 @@ class BacktestAnalyzer:
         analysis = self.analyze_results(signals_df)
         
         # Step 5: Generate report
-        report = self.generate_report(signals_df, analysis)
+        report = self.generate_report(signals_df, analysis, for_days=current_backtest_days)
         
         # Step 6: Save results
         self.save_results(signals_df, analysis, report)

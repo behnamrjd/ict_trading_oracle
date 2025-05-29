@@ -2,13 +2,14 @@
 Core module for ICT Trading Oracle
 """
 
-import sys
-import os
+# sys.path manipulations removed for standard import behavior
+# import sys 
+# import os
 
-# Add parent directory to path
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# # Add parent directory to path
+# parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# if parent_dir not in sys.path:
+#     sys.path.insert(0, parent_dir)
 
 # Import all core modules
 try:
@@ -16,20 +17,33 @@ try:
 except ImportError:
     APIManager = None
 
+RealICTAnalyzer = None # Initialize to None
+TechnicalAnalyzer = None # Initialize alias to None
 try:
-    from .technical_analysis import TechnicalAnalyzer
+    from .technical_analysis import RealICTAnalyzer
+    TechnicalAnalyzer = RealICTAnalyzer  # Alias for broader compatibility
 except ImportError:
-    TechnicalAnalyzer = None
+    # RealICTAnalyzer and TechnicalAnalyzer remain None if import fails
+    pass 
 
 try:
     from .database import DatabaseManager
 except ImportError:
     DatabaseManager = None
 
+PaymentManager = None # Initialize to None
+SubscriptionManager = None # Initialize to None
 try:
     from .payment_manager import PaymentManager, SubscriptionManager
 except ImportError:
-    PaymentManager = None
-    SubscriptionManager = None
+    # PaymentManager and SubscriptionManager remain None if import fails
+    pass
 
-__all__ = ['APIManager', 'TechnicalAnalyzer', 'DatabaseManager', 'PaymentManager', 'SubscriptionManager']
+__all__ = [
+    'APIManager', 
+    'RealICTAnalyzer', # Exporting the real name
+    'TechnicalAnalyzer', # Exporting the alias
+    'DatabaseManager', 
+    'PaymentManager', 
+    'SubscriptionManager'
+]

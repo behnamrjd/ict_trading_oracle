@@ -11,6 +11,8 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY", "YOUR_NEWS_API_KEY")
 
 # Payment Configuration
 ZARINPAL_MERCHANT_ID = os.getenv("ZARINPAL_MERCHANT_ID", "YOUR_ZARINPAL_MERCHANT")
+ZARINPAL_SANDBOX = os.getenv("ZARINPAL_SANDBOX", "true").lower() == "true"
+PAYMENT_CALLBACK_DOMAIN = os.getenv("PAYMENT_CALLBACK_DOMAIN", "yourdomain.com")
 CRYPTAPI_CALLBACK_URL = os.getenv("CRYPTAPI_CALLBACK_URL", "https://yourdomain.com/api")
 
 # Database Configuration
@@ -64,8 +66,8 @@ MONITORING_INTERVAL = int(os.getenv("MONITORING_INTERVAL", "60"))
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "admin@yourdomain.com")
 
 # Logging Configuration
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FILE = BASE_DIR / "logs" / "ict_trading.log"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FILE_PATH_CONFIG = str(BASE_DIR / "logs" / "ict_trading.log")
 
 # Performance Configuration
 MAX_CONCURRENT_USERS = 1000

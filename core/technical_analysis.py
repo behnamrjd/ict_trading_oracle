@@ -7,9 +7,19 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import ta
+from ta import trend as ta_trend
+from ta import volatility as ta_volatility
+from ta import momentum as ta_momentum
+from ta import volume as ta_volume
 from datetime import datetime, timedelta
 import logging
 import warnings
+import time
+import gc
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 warnings.filterwarnings('ignore')
 
 logger = logging.getLogger(__name__)
@@ -19,53 +29,116 @@ class RealICTAnalyzer:
         self.symbol = "GC=F"  # Gold futures
         self.timeframes = ['1m', '5m', '15m', '1h', '4h', '1d']
         self.min_data_points = 50  # Minimum data points for analysis
+        self.max_retries = 3
+        self.retry_delay = 2
+        
+        # Setup robust HTTP session
+        self.session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=0.3,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Data limits for memory management
+        self.data_limits = {
+            '1m': 200,   # 3+ hours
+            '5m': 500,   # ~2 days  
+            '15m': 500,  # ~5 days
+            '1h': 720,   # 30 days
+            '4h': 720,   # 120 days
+            '1d': 365    # 1 year
+        }
         
     def get_multi_timeframe_data(self):
-        """Get comprehensive multi-timeframe data"""
+        """Get comprehensive multi-timeframe data with error recovery"""
         data = {}
-        try:
-            ticker = yf.Ticker(self.symbol)
-            
-            # Get different timeframe data with proper periods
-            timeframe_config = {
-                '1m': {'period': '1d', 'interval': '1m'},
-                '5m': {'period': '5d', 'interval': '5m'},
-                '15m': {'period': '5d', 'interval': '15m'},
-                '1h': {'period': '30d', 'interval': '1h'},
-                '1d': {'period': '1y', 'interval': '1d'}
-            }
-            
-            for tf, config in timeframe_config.items():
-                try:
-                    df = ticker.history(period=config['period'], interval=config['interval'])
-                    if not df.empty and len(df) >= 10:
-                        data[tf] = df
-                        logger.info(f"✓ {tf} data: {len(df)} candles")
-                    else:
-                        logger.warning(f"✗ {tf} data: insufficient data")
-                except Exception as e:
-                    logger.error(f"Error getting {tf} data: {e}")
-            
-            # Create 4H data by resampling 1H
-            if '1h' in data and not data['1h'].empty:
-                try:
-                    data['4h'] = data['1h'].resample('4H').agg({
-                        'Open': 'first',
-                        'High': 'max',
-                        'Low': 'min',
-                        'Close': 'last',
-                        'Volume': 'sum'
-                    }).dropna()
-                    logger.info(f"✓ 4h data: {len(data['4h'])} candles (resampled)")
-                except Exception as e:
-                    logger.error(f"Error creating 4H data: {e}")
-            
-            return data
-            
-        except Exception as e:
-            logger.error(f"Error in get_multi_timeframe_data: {e}")
-            return {}
-    
+        
+        for attempt in range(self.max_retries):
+            try:
+                ticker = yf.Ticker(self.symbol)
+                
+                # Get different timeframe data with proper periods and limits
+                timeframe_config = {
+                    '1m': {'period': '1d', 'interval': '1m'},
+                    '5m': {'period': '5d', 'interval': '5m'},
+                    '15m': {'period': '5d', 'interval': '15m'},
+                    '1h': {'period': '30d', 'interval': '1h'},
+                    '1d': {'period': '1y', 'interval': '1d'}
+                }
+                
+                for tf, config in timeframe_config.items():
+                    try:
+                        logger.info(f"📊 Fetching {tf} data (attempt {attempt + 1})...")
+                        
+                        # Get data with timeout
+                        df = ticker.history(
+                            period=config['period'], 
+                            interval=config['interval'],
+                            timeout=30
+                        )
+                        
+                        if not df.empty and len(df) >= 10:
+                            # Limit data size for memory management
+                            max_rows = self.data_limits.get(tf, 500)
+                            if len(df) > max_rows:
+                                df = df.tail(max_rows)
+                            
+                            data[tf] = df
+                            logger.info(f"✅ {tf} data: {len(df)} candles")
+                        else:
+                            logger.warning(f"⚠️ {tf} data: insufficient data ({len(df)} candles)")
+                            
+                    except Exception as tf_error:
+                        logger.error(f"❌ Error getting {tf} data: {tf_error}")
+                        continue
+                
+                # Create 4H data by resampling 1H if available
+                if '1h' in data and not data['1h'].empty:
+                    try:
+                        data['4h'] = data['1h'].resample('4H').agg({
+                            'Open': 'first',
+                            'High': 'max',
+                            'Low': 'min',
+                            'Close': 'last',
+                            'Volume': 'sum'
+                        }).dropna()
+                        
+                        # Limit 4H data
+                        max_4h = self.data_limits.get('4h', 720)
+                        if len(data['4h']) > max_4h:
+                            data['4h'] = data['4h'].tail(max_4h)
+                        
+                        logger.info(f"✅ 4h data: {len(data['4h'])} candles (resampled)")
+                    except Exception as resample_error:
+                        logger.error(f"❌ Error creating 4H data: {resample_error}")
+                
+                # Memory cleanup
+                gc.collect()
+                
+                # If we got at least one timeframe, consider it success
+                if data:
+                    logger.info(f"🎯 Successfully loaded {len(data)} timeframes")
+                    return data
+                else:
+                    raise Exception("No timeframe data available")
+                    
+            except Exception as e:
+                logger.error(f"❌ Attempt {attempt + 1} failed: {e}")
+                
+                if attempt < self.max_retries - 1:
+                    wait_time = self.retry_delay ** attempt
+                    logger.info(f"⏳ Waiting {wait_time}s before retry...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error("❌ All attempts failed, returning empty data")
+                    return {}
+        
+        return {}
+        
     def identify_market_structure(self, data):
         """Advanced ICT Market Structure Analysis"""
         if data.empty or len(data) < 20:
@@ -290,7 +363,7 @@ class RealICTAnalyzer:
         
         try:
             # Calculate average true range for gap size validation
-            atr = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=14).average_true_range()
+            atr = ta_volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=14).average_true_range()
             min_gap_threshold = atr.iloc[-1] * min_gap_size if not atr.empty else 1.0
             
             for i in range(1, len(data) - 1):
@@ -614,32 +687,32 @@ class RealICTAnalyzer:
             # === TREND INDICATORS ===
             
             # Moving Averages
-            indicators['sma_9'] = ta.trend.SMAIndicator(data['Close'], window=9).sma_indicator().iloc[-1]
-            indicators['sma_20'] = ta.trend.SMAIndicator(data['Close'], window=20).sma_indicator().iloc[-1]
-            indicators['sma_50'] = ta.trend.SMAIndicator(data['Close'], window=50).sma_indicator().iloc[-1]
-            indicators['sma_200'] = ta.trend.SMAIndicator(data['Close'], window=min(200, len(data))).sma_indicator().iloc[-1]
+            indicators['sma_9'] = ta_trend.SMAIndicator(data['Close'], window=9).sma_indicator().iloc[-1]
+            indicators['sma_20'] = ta_trend.SMAIndicator(data['Close'], window=20).sma_indicator().iloc[-1]
+            indicators['sma_50'] = ta_trend.SMAIndicator(data['Close'], window=50).sma_indicator().iloc[-1]
+            indicators['sma_200'] = ta_trend.SMAIndicator(data['Close'], window=min(200, len(data))).sma_indicator().iloc[-1]
             
             # Exponential Moving Averages
-            indicators['ema_9'] = ta.trend.EMAIndicator(data['Close'], window=9).ema_indicator().iloc[-1]
-            indicators['ema_12'] = ta.trend.EMAIndicator(data['Close'], window=12).ema_indicator().iloc[-1]
-            indicators['ema_21'] = ta.trend.EMAIndicator(data['Close'], window=21).ema_indicator().iloc[-1]
-            indicators['ema_26'] = ta.trend.EMAIndicator(data['Close'], window=26).ema_indicator().iloc[-1]
-            indicators['ema_50'] = ta.trend.EMAIndicator(data['Close'], window=50).ema_indicator().iloc[-1]
+            indicators['ema_9'] = ta_trend.EMAIndicator(data['Close'], window=9).ema_indicator().iloc[-1]
+            indicators['ema_12'] = ta_trend.EMAIndicator(data['Close'], window=12).ema_indicator().iloc[-1]
+            indicators['ema_21'] = ta_trend.EMAIndicator(data['Close'], window=21).ema_indicator().iloc[-1]
+            indicators['ema_26'] = ta_trend.EMAIndicator(data['Close'], window=26).ema_indicator().iloc[-1]
+            indicators['ema_50'] = ta_trend.EMAIndicator(data['Close'], window=50).ema_indicator().iloc[-1]
             
             # MACD Family
-            macd = ta.trend.MACD(data['Close'], window_slow=26, window_fast=12, window_sign=9)
+            macd = ta_trend.MACD(data['Close'], window_slow=26, window_fast=12, window_sign=9)
             indicators['macd'] = macd.macd().iloc[-1]
             indicators['macd_signal'] = macd.macd_signal().iloc[-1]
             indicators['macd_histogram'] = macd.macd_diff().iloc[-1]
             
             # ADX (Average Directional Index)
-            adx = ta.trend.ADXIndicator(data['High'], data['Low'], data['Close'], window=14)
+            adx = ta_trend.ADXIndicator(data['High'], data['Low'], data['Close'], window=14)
             indicators['adx'] = adx.adx().iloc[-1]
             indicators['adx_pos'] = adx.adx_pos().iloc[-1]
             indicators['adx_neg'] = adx.adx_neg().iloc[-1]
             
             # Parabolic SAR
-            psar = ta.trend.PSARIndicator(data['High'], data['Low'], data['Close'])
+            psar = ta_trend.PSARIndicator(data['High'], data['Low'], data['Close'])
             indicators['psar'] = psar.psar().iloc[-1]
             indicators['psar_up'] = psar.psar_up().iloc[-1] if not pd.isna(psar.psar_up().iloc[-1]) else None
             indicators['psar_down'] = psar.psar_down().iloc[-1] if not pd.isna(psar.psar_down().iloc[-1]) else None
@@ -647,28 +720,28 @@ class RealICTAnalyzer:
             # === MOMENTUM INDICATORS ===
             
             # RSI (Relative Strength Index)
-            indicators['rsi_14'] = ta.momentum.RSIIndicator(data['Close'], window=14).rsi().iloc[-1]
-            indicators['rsi_21'] = ta.momentum.RSIIndicator(data['Close'], window=21).rsi().iloc[-1]
+            indicators['rsi_14'] = ta_momentum.RSIIndicator(data['Close'], window=14).rsi().iloc[-1]
+            indicators['rsi_21'] = ta_momentum.RSIIndicator(data['Close'], window=21).rsi().iloc[-1]
             
             # Stochastic Oscillator
-            stoch = ta.momentum.StochasticOscillator(data['High'], data['Low'], data['Close'])
+            stoch = ta_momentum.StochasticOscillator(data['High'], data['Low'], data['Close'])
             indicators['stoch_k'] = stoch.stoch().iloc[-1]
             indicators['stoch_d'] = stoch.stoch_signal().iloc[-1]
             
             # Williams %R
-            indicators['williams_r'] = ta.momentum.WilliamsRIndicator(data['High'], data['Low'], data['Close']).williams_r().iloc[-1]
+            indicators['williams_r'] = ta_momentum.WilliamsRIndicator(data['High'], data['Low'], data['Close']).williams_r().iloc[-1]
             
             # ROC (Rate of Change)
-            indicators['roc_12'] = ta.momentum.ROCIndicator(data['Close'], window=12).roc().iloc[-1]
-            indicators['roc_25'] = ta.momentum.ROCIndicator(data['Close'], window=25).roc().iloc[-1]
+            indicators['roc_12'] = ta_momentum.ROCIndicator(data['Close'], window=12).roc().iloc[-1]
+            indicators['roc_25'] = ta_momentum.ROCIndicator(data['Close'], window=25).roc().iloc[-1]
             
             # CCI (Commodity Channel Index)
-            indicators['cci'] = ta.trend.CCIIndicator(data['High'], data['Low'], data['Close']).cci().iloc[-1]
+            indicators['cci'] = ta_trend.CCIIndicator(data['High'], data['Low'], data['Close']).cci().iloc[-1]
             
             # === VOLATILITY INDICATORS ===
             
             # Bollinger Bands
-            bb = ta.volatility.BollingerBands(data['Close'], window=20, window_dev=2)
+            bb = ta_volatility.BollingerBands(data['Close'], window=20, window_dev=2)
             indicators['bb_upper'] = bb.bollinger_hband().iloc[-1]
             indicators['bb_middle'] = bb.bollinger_mavg().iloc[-1]
             indicators['bb_lower'] = bb.bollinger_lband().iloc[-1]
@@ -676,17 +749,17 @@ class RealICTAnalyzer:
             indicators['bb_percent'] = ((data['Close'].iloc[-1] - indicators['bb_lower']) / (indicators['bb_upper'] - indicators['bb_lower'])) * 100
             
             # ATR (Average True Range)
-            indicators['atr_14'] = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=14).average_true_range().iloc[-1]
-            indicators['atr_21'] = ta.volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=21).average_true_range().iloc[-1]
+            indicators['atr_14'] = ta_volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=14).average_true_range().iloc[-1]
+            indicators['atr_21'] = ta_volatility.AverageTrueRange(data['High'], data['Low'], data['Close'], window=21).average_true_range().iloc[-1]
             
             # Keltner Channels
-            kc = ta.volatility.KeltnerChannel(data['High'], data['Low'], data['Close'])
+            kc = ta_volatility.KeltnerChannel(data['High'], data['Low'], data['Close'])
             indicators['kc_upper'] = kc.keltner_channel_hband().iloc[-1]
             indicators['kc_middle'] = kc.keltner_channel_mband().iloc[-1]
             indicators['kc_lower'] = kc.keltner_channel_lband().iloc[-1]
             
             # Donchian Channels
-            dc = ta.volatility.DonchianChannel(data['High'], data['Low'], data['Close'])
+            dc = ta_volatility.DonchianChannel(data['High'], data['Low'], data['Close'])
             indicators['dc_upper'] = dc.donchian_channel_hband().iloc[-1]
             indicators['dc_middle'] = dc.donchian_channel_mband().iloc[-1]
             indicators['dc_lower'] = dc.donchian_channel_lband().iloc[-1]
@@ -699,16 +772,16 @@ class RealICTAnalyzer:
                 indicators['volume_ratio'] = data['Volume'].iloc[-1] / indicators['volume_sma']
                 
                 # On Balance Volume
-                indicators['obv'] = ta.volume.OnBalanceVolumeIndicator(data['Close'], data['Volume']).on_balance_volume().iloc[-1]
+                indicators['obv'] = ta_volume.OnBalanceVolumeIndicator(data['Close'], data['Volume']).on_balance_volume().iloc[-1]
                 
                 # Volume Price Trend
-                indicators['vpt'] = ta.volume.VolumePriceTrendIndicator(data['Close'], data['Volume']).volume_price_trend().iloc[-1]
+                indicators['vpt'] = ta_volume.VolumePriceTrendIndicator(data['Close'], data['Volume']).volume_price_trend().iloc[-1]
                 
                 # Accumulation/Distribution Line
-                indicators['ad_line'] = ta.volume.AccDistIndexIndicator(data['High'], data['Low'], data['Close'], data['Volume']).acc_dist_index().iloc[-1]
+                indicators['ad_line'] = ta_volume.AccDistIndexIndicator(data['High'], data['Low'], data['Close'], data['Volume']).acc_dist_index().iloc[-1]
                 
                 # Chaikin Money Flow
-                indicators['cmf'] = ta.volume.ChaikinMoneyFlowIndicator(data['High'], data['Low'], data['Close'], data['Volume']).chaikin_money_flow().iloc[-1]
+                indicators['cmf'] = ta_volume.ChaikinMoneyFlowIndicator(data['High'], data['Low'], data['Close'], data['Volume']).chaikin_money_flow().iloc[-1]
                 
                 # Volume Weighted Average Price (VWAP)
                 indicators['vwap'] = self._calculate_vwap(data)
@@ -881,14 +954,14 @@ class RealICTAnalyzer:
                 return 50
             
             # Calculate recent volatility (ATR)
-            recent_atr = ta.volatility.AverageTrueRange(
+            recent_atr = ta_volatility.AverageTrueRange(
                 data['High'].tail(14), 
                 data['Low'].tail(14), 
                 data['Close'].tail(14)
             ).average_true_range().iloc[-1]
             
             # Calculate historical volatility (last 30 periods)
-            historical_atr = ta.volatility.AverageTrueRange(
+            historical_atr = ta_volatility.AverageTrueRange(
                 data['High'].tail(30), 
                 data['Low'].tail(30), 
                 data['Close'].tail(30)
@@ -1024,7 +1097,7 @@ class RealICTAnalyzer:
             )
             
             # Final signal decision
-            final_signal = self._make_final_signal_decision(signal_data)
+            final_signal = self._make_final_signal_decision(signal_data, current_price, indicators, mtf_bias)
             
             # === BUILD COMPREHENSIVE RESPONSE ===
             response = {
@@ -1241,15 +1314,36 @@ class RealICTAnalyzer:
                 signal_score += 2  # Neutral RSI is slightly positive
             
             # === MULTI-TIMEFRAME BIAS ===
+            # Increased impact of MTF bias
+            mtf_strength_factor = 0.25 # Max impact of 25 points (100 * 0.25)
             if mtf_bias['overall_bias'] == 'BULLISH':
-                signal_score += mtf_bias['strength'] * 0.15
+                bias_points = mtf_bias['strength'] * mtf_strength_factor
+                signal_score += bias_points
                 confluence_factors.append('MTF_BULLISH')
-                reasons.append("Multi-timeframe bullish bias")
+                reasons.append(f"Multi-timeframe bullish bias (strength: {mtf_bias['strength']}%)")
             elif mtf_bias['overall_bias'] == 'BEARISH':
-                signal_score -= mtf_bias['strength'] * 0.15
+                bias_points = mtf_bias['strength'] * mtf_strength_factor
+                signal_score -= bias_points
                 confluence_factors.append('MTF_BEARISH')
-                reasons.append("Multi-timeframe bearish bias")
-            
+                reasons.append(f"Multi-timeframe bearish bias (strength: {mtf_bias['strength']}%)")
+            else: # Neutral MTF bias
+                reasons.append("Multi-timeframe bias is neutral.")
+                # Optionally, slightly penalize for neutral MTF if clarity is desired
+                # signal_score -= 5 
+
+            # Check for strong MTF opposition to developing signal direction
+            # This check is more about dampening a signal if MTF strongly opposes it.
+            # The _make_final_signal_decision will also check this, but we can preemptively adjust score here.
+            developing_bullish = signal_score > 55 # Tentatively bullish
+            developing_bearish = signal_score < 45 # Tentatively bearish
+
+            if developing_bullish and mtf_bias['overall_bias'] == 'BEARISH' and mtf_bias['strength'] > 60:
+                signal_score -= 20 # Strong penalty for HTF opposing a bullish setup
+                reasons.append("Strong bearish MTF opposes developing bullish signal.")
+            elif developing_bearish and mtf_bias['overall_bias'] == 'BULLISH' and mtf_bias['strength'] > 60:
+                signal_score += 20 # Effectively a penalty for bearish (moves score towards neutral/bullish)
+                reasons.append("Strong bullish MTF opposes developing bearish signal.")
+
             # === VOLUME CONFIRMATION ===
             volume_ratio = indicators.get('volume_ratio', 1)
             if volume_ratio > 1.5:
@@ -1276,8 +1370,12 @@ class RealICTAnalyzer:
                 'reasons': ['Error in analysis']
             }
     
-    def _make_final_signal_decision(self, signal_data):
+    def _make_final_signal_decision(self, signal_data, current_price_real, indicators_real, mtf_bias_real):
         """Make final trading signal decision with risk management"""
+        MIN_RR_RATIO = 1.5  # Minimum acceptable Risk/Reward ratio
+        NEUTRAL_MTF_CONFIDENCE_PENALTY = 15 # Penalty for neutral MTF
+        OPPOSING_MTF_CONFIDENCE_PENALTY = 30 # Penalty for opposing MTF
+
         try:
             score = signal_data['signal_score']
             confluence = signal_data['confluence_count']
@@ -1289,44 +1387,78 @@ class RealICTAnalyzer:
             elif score <= 35 and confluence >= 3:
                 direction = 'SELL'
                 confidence = min((100 - score) + confluence * 2, 95)
-            elif score >= 60:
+            elif score >= 60: # Looser condition for BUY
                 direction = 'BUY'
                 confidence = min(score + confluence, 85)
-            elif score <= 40:
+            elif score <= 40: # Looser condition for SELL
                 direction = 'SELL'
                 confidence = min((100 - score) + confluence, 85)
             else:
                 direction = 'HOLD'
                 confidence = 50
             
+            # Apply MTF Bias to confidence
+            if direction != 'HOLD':
+                if mtf_bias_real['overall_bias'] == 'NEUTRAL':
+                    confidence -= NEUTRAL_MTF_CONFIDENCE_PENALTY
+                    signal_data['reasons'].append("Neutral MTF bias reduced confidence.")
+                elif (direction == 'BUY' and mtf_bias_real['overall_bias'] == 'BEARISH') or \
+                     (direction == 'SELL' and mtf_bias_real['overall_bias'] == 'BULLISH'):
+                    confidence -= OPPOSING_MTF_CONFIDENCE_PENALTY
+                    signal_data['reasons'].append("Opposing MTF bias significantly reduced confidence.")
+            
+            confidence = max(0, min(confidence, 95)) # Ensure confidence is within bounds
+
             # Calculate trading levels
-            current_price = 3280  # Will be updated with real price
-            atr = 20  # Will be updated with real ATR
+            # Use real current_price and ATR from indicators if available
+            current_price = current_price_real
+            atr = indicators_real.get('atr_14', current_price * 0.01) # Default ATR to 1% of price if not found
+            
+            if atr is None or atr == 0: # Ensure ATR is a valid positive number
+                atr = current_price * 0.01 # Fallback if ATR is zero or None
+
+            entry_low = current_price * 0.999
+            entry_high = current_price * 1.001
             
             if direction == 'BUY':
-                entry_zone = {'low': current_price * 0.998, 'high': current_price * 1.002}
+                entry_zone = {'low': round(entry_low, 2), 'high': round(entry_high, 2)}
                 stop_loss = current_price - (atr * 1.5)
                 tp1 = current_price + (atr * 2)
                 tp2 = current_price + (atr * 3.5)
             elif direction == 'SELL':
-                entry_zone = {'low': current_price * 0.998, 'high': current_price * 1.002}
+                entry_zone = {'low': round(entry_low, 2), 'high': round(entry_high, 2)}
                 stop_loss = current_price + (atr * 1.5)
                 tp1 = current_price - (atr * 2)
                 tp2 = current_price - (atr * 3.5)
-            else:
-                entry_zone = {'low': current_price, 'high': current_price}
+            else: # HOLD
+                entry_zone = {'low': round(current_price, 2), 'high': round(current_price, 2)}
                 stop_loss = current_price
                 tp1 = current_price
                 tp2 = current_price
             
             # Calculate risk-reward ratio
+            risk_reward = 0
             if direction != 'HOLD':
                 risk = abs(current_price - stop_loss)
                 reward = abs(tp1 - current_price)
-                risk_reward = round(reward / risk, 2) if risk > 0 else 0
-            else:
-                risk_reward = 0
-            
+                risk_reward = round(reward / risk, 2) if risk > 0.00001 else 0 # Avoid division by zero for very small risk
+
+                # Apply RR Filter
+                if risk_reward < MIN_RR_RATIO:
+                    original_direction = direction
+                    direction = 'HOLD'
+                    # Reduce confidence significantly if RR is poor, but not to zero unless it was already very low
+                    confidence = max(0, confidence - 40) 
+                    signal_data['reasons'].append(f"Poor Risk/Reward ({risk_reward:.2f} < {MIN_RR_RATIO}). Original: {original_direction}.")
+                    if confidence < 30 and original_direction != 'HOLD': # If confidence drops very low due to RR
+                         signal_data['reasons'].append("Signal changed to HOLD due to very low confidence after RR filter.")
+
+
+            # If confidence is too low after all checks, set to HOLD
+            if confidence < 40 and direction != 'HOLD':
+                signal_data['reasons'].append(f"Confidence ({confidence:.1f}%) too low. Signal changed to HOLD.")
+                direction = 'HOLD'
+
             return {
                 'direction': direction,
                 'confidence': round(confidence, 1),

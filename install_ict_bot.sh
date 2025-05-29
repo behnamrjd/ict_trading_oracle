@@ -842,9 +842,9 @@ setup_project_environment() {
     done
     
     # Install from requirements if available
-    if [ -f "requirements_fixed.txt" ]; then
+    if [ -f "requirements.txt" ]; then
         print_status "Installing remaining dependencies from requirements..."
-        pip install -r requirements_fixed.txt >> /var/log/ict_install.log 2>&1
+        pip install -r requirements.txt >> "$LOG_FILE" 2>&1
         if [ $? -eq 0 ]; then
             print_success "Requirements installed successfully"
         else
@@ -1441,8 +1441,8 @@ quick_repair() {
             python3.11 -m venv venv
             source venv/bin/activate
             pip install --upgrade pip
-            pip install -r requirements_fixed.txt
-        " > /dev/null 2>&1
+            pip install -r requirements.txt
+        " > "$LOG_FILE" 2>&1
         
         check_status "Virtual environment recreated" "Failed to recreate virtual environment"
     fi
