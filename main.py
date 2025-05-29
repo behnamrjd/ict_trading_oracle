@@ -246,7 +246,7 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(price_text, parse_mode='Markdown')
 
 async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Get real ICT analysis with database tracking"""
+    """Get real ICT analysis with advanced 25+ indicators"""
     user_id = update.effective_user.id
     
     # Check if user can receive signals
@@ -260,6 +260,155 @@ async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 limit = 3 if user_data and user_data['subscription_type'] == 'free' else 50
                 
                 await update.message.reply_text(f"""
+⚠️ **Daily Signal Limit Reached**
+
+You've used all {limit} signals for today.
+
+🔄 **Reset Time:** Tomorrow at 00:00 UTC
+💎 **Upgrade:** Use /subscribe for premium subscription
+
+📊 **Current Plan:** {user_data['subscription_type'].upper() if user_data else 'FREE'}
+                """, parse_mode='Markdown')
+                return
+    except Exception as e:
+        logger.error(f"Database error in signal command: {e}")
+    
+    # Show analysis progress
+    progress_msg = await update.message.reply_text("🔍 **Starting Advanced ICT Analysis...**\n\n⏳ Fetching multi-timeframe data...")
+    
+    try:
+        # Import the new analyzer
+        tech_analyzer = safe_import_technical_analyzer()
+        api_manager = safe_import_api_manager()
+        
+        if not tech_analyzer:
+            await progress_msg.edit_text("❌ **Error:** Technical analyzer not available")
+            return
+        
+        # Update progress
+        await progress_msg.edit_text("🔍 **Advanced ICT Analysis in Progress...**\n\n📊 Analyzing market structure...\n⚡ Detecting order blocks...\n💧 Finding liquidity pools...")
+        
+        # Get comprehensive analysis
+        analysis = tech_analyzer.generate_real_ict_signal()
+        
+        # Update progress
+        await progress_msg.edit_text("🔍 **Advanced ICT Analysis in Progress...**\n\n📈 Calculating 25+ indicators...\n🎯 Generating signal...\n✅ Almost done...")
+        
+        if analysis and analysis.get('data_quality') != 'FALLBACK_MODE':
+            # Build comprehensive signal message
+            signal_text = f"""
+🎯 **Advanced ICT Analysis - Gold (XAU/USD)**
+📊 **Real-Time Analysis with 25+ Indicators**
+
+💰 **Current Price:** ${analysis['current_price']}
+🎪 **Signal:** {analysis['signal']} 
+🔥 **Confidence:** {analysis['confidence']}%
+⭐ **Quality:** {analysis['signal_quality']}
+
+📋 **ICT Structure Analysis:**
+🏗️ Market Structure: {analysis['ict_analysis']['market_structure']} ({analysis['ict_analysis']['structure_strength']}%)
+📦 Order Blocks: {analysis['ict_analysis']['order_blocks_count']} detected
+⚡ Fair Value Gaps: {analysis['ict_analysis']['fair_value_gaps']} active
+💧 Liquidity Pools: {analysis['ict_analysis']['liquidity_pools']} identified
+
+📊 **Technical Summary:**
+📈 Trend: {analysis['technical_summary']['trend_direction']} (Strength: {analysis['technical_summary']['trend_strength']}%)
+🚀 Momentum: {analysis['technical_summary']['momentum_strength']}%
+📊 RSI(14): {analysis['technical_summary']['rsi_14']}
+📈 MACD: {analysis['technical_summary']['macd_signal']}
+🎯 BB Position: {analysis['technical_summary']['bb_position']['position']}
+
+🕐 **Multi-Timeframe Analysis:**
+🎯 Overall Bias: {analysis['multi_timeframe']['overall_bias']} ({analysis['multi_timeframe']['strength']}%)
+📊 Timeframes: {', '.join(analysis['multi_timeframe']['timeframes_analyzed'])}
+
+💡 **Trading Levels:**
+🎯 Entry Zone: ${analysis['trading_levels']['entry_zone']['low']:.2f} - ${analysis['trading_levels']['entry_zone']['high']:.2f}
+🛡️ Stop Loss: ${analysis['trading_levels']['stop_loss']}
+🎯 Take Profit 1: ${analysis['trading_levels']['take_profit_1']}
+🎯 Take Profit 2: ${analysis['trading_levels']['take_profit_2']}
+📊 Risk/Reward: 1:{analysis['trading_levels']['risk_reward_ratio']}
+
+🔗 **Signal Confluence:** {analysis['confluence_factors']} factors
+📝 **Key Reasons:**
+"""
+            
+            # Add top reasons
+            for i, reason in enumerate(analysis['signal_reasoning'][:3], 1):
+                signal_text += f"   {i}. {reason}\n"
+            
+            signal_text += f"""
+🌐 **Market Context:**
+🕐 Session: {analysis['market_context']['session']}
+📊 Volatility: {analysis['market_context']['volatility_environment']}
+📈 Trend Environment: {analysis['market_context']['trend_environment']}
+
+📊 **Analysis Details:**
+🔢 Indicators Used: {analysis['indicators_count']}
+⏰ Analysis Time: {analysis['analysis_time']}
+🎯 Primary Timeframe: {analysis['timeframe_used']}
+📡 Data Quality: {analysis['data_quality']}
+
+⚠️ **Note:** Advanced ICT analysis with real market data and 25+ technical indicators!
+
+🔄 **Refresh:** /signal
+            """
+            
+            # Record signal in database
+            try:
+                if db_manager:
+                    signal_data = {
+                        'signal_type': 'ICT_ADVANCED',
+                        'symbol': 'GOLD',
+                        'price': analysis['current_price'],
+                        'signal_direction': analysis['signal'],
+                        'confidence': analysis['confidence'],
+                        'entry_price': analysis['current_price'],
+                        'stop_loss': analysis['trading_levels']['stop_loss'],
+                        'take_profit': analysis['trading_levels']['take_profit_1'],
+                        'market_structure': analysis['ict_analysis']['market_structure'],
+                        'order_block': f"{analysis['ict_analysis']['order_blocks_count']} blocks",
+                        'fvg_status': f"{analysis['ict_analysis']['fair_value_gaps']} gaps",
+                        'rsi_value': analysis['technical_summary']['rsi_14'],
+                        'confluence_factors': analysis['confluence_factors'],
+                        'signal_quality': analysis['signal_quality']
+                    }
+                    
+                    signal_id = db_manager.add_signal(signal_data)
+                    if signal_id and not is_admin(user_id):
+                        db_manager.record_user_signal(user_id, signal_id)
+            except Exception as e:
+                logger.error(f"Error saving advanced signal to database: {e}")
+            
+        else:
+            # Fallback message
+            signal_text = """
+❌ **Advanced ICT Analysis Unavailable**
+
+🔧 **Issue:** Unable to fetch real-time market data
+📊 **Fallback:** Basic analysis mode active
+
+🔄 **Try again:** /signal
+📞 **Support:** Contact admin if issue persists
+
+💡 **Tip:** Advanced analysis requires stable internet connection and market data access.
+            """
+        
+        # Send final result
+        await progress_msg.edit_text(signal_text, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in advanced signal command: {e}")
+        await progress_msg.edit_text(f"""
+❌ **Analysis Error**
+
+🔧 **Error:** {str(e)[:100]}...
+🔄 **Try again:** /signal
+📞 **Support:** Contact admin
+
+💡 **Note:** This is an advanced analysis system. Some errors are expected during development.
+        """, parse_mode='Markdown')
+
 ⚠️ **Daily Signal Limit Reached**
 
 You've used all {limit} signals for today.
