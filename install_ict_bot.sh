@@ -856,7 +856,8 @@ main() {
     fi
 
     # STEP 4: Setup Project Environment
-    print_step "STEP 4: Setting Up Complete Project Environment"
+print_status "Installing project in development mode..."
+sudo -u ictbot bash -c "cd /home/ictbot/ict_trading_oracle && source venv/bin/activate && pip install -e ."
 
     # Switch to ictbot user and continue installation
     sudo -u ictbot bash << 'EOF'
@@ -1808,20 +1809,111 @@ MAINEOF
 
 EOF
 
-    check_status "Complete project environment setup completed" "Project environment setup failed"
+    # STEP 4.13: Create setup.py file
+    print_status "Creating setup.py file..."
+    sudo -u ictbot tee /home/ictbot/ict_trading_oracle/setup.py > /dev/null << 'SETUPEOF'
+"""
+Setup script for ICT Trading Oracle
+"""
 
-    # STEP 5: Create systemd Service
-    print_step "STEP 5: Creating systemd Service"
+from setuptools import setup, find_packages
+import os
 
-    if service_exists "ictbot"; then
-        print_warning "ictbot service already exists, updating..."
-        systemctl stop ictbot > /dev/null 2>&1
+# Read requirements
+def read_requirements():
+    req_file = os.path.join(os.path.dirname(__file__), 'requirements_fixed.txt')
+    if os.path.exists(req_file):
+        with open(req_file, 'r') as f:
+            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    return []
+
+setup(
+    name="ict-trading-oracle",
+    version="1.0.0",
+    description="ICT Trading Oracle Bot",
+    packages=find_packages(),
+    install_requires=read_requirements(),
+    python_requires=">=3.8",
+    include_package_data=True,
+    package_data={
+        '': ['*.txt', '*.md', '*.env.example'],
+    },
+)
+SETUPEOF
+
+    check_status "setup.py created successfully" "Failed to create setup.py"
+
+    # STEP 4.14: Create run.py entry point
+    print_status "Creating run.py entry point..."
+    sudo -u ictbot tee /home/ictbot/ict_trading_oracle/run.py > /dev/null << 'RUNEOF'
+#!/usr/bin/env python3
+"""
+ICT Trading Oracle Bot Runner
+"""
+
+import sys
+import os
+
+# Add current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Import and run main
+if __name__ == "__main__":
+    try:
+        from main import run_bot
+        run_bot()
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("Please ensure all dependencies are installed")
+        sys.exit(1)
+RUNEOF
+
+    check_status "run.py created successfully" "Failed to create run.py"
+
+    # Make run.py executable
+    sudo chmod +x /home/ictbot/ict_trading_oracle/run.py
+    check_status "run.py made executable" "Failed to make run.py executable"
+
+    # STEP 4.15: Install setuptools and project
+    print_status "Installing setuptools and wheel..."
+    sudo -u ictbot bash -c "cd /home/ictbot/ict_trading_oracle && source venv/bin/activate && pip install setuptools wheel" > /dev/null 2>&1
+    check_status "setuptools and wheel installed" "Failed to install setuptools"
+
+    print_status "Installing project in development mode..."
+    sudo -u ictbot bash -c "cd /home/ictbot/ict_trading_oracle && source venv/bin/activate && pip install -e ." > /dev/null 2>&1
+    check_status "Project installed in development mode" "Failed to install project"
+
+    # Test imports after installation
+    print_status "Testing Python imports after installation..."
+    test_imports=$(sudo -u ictbot bash -c "cd /home/ictbot/ict_trading_oracle && source venv/bin/activate && python -c 'from core.api_manager import APIManager; from core.technical_analysis import TechnicalAnalyzer; from core.database import DatabaseManager; print(\"✅ All imports successful\")'" 2>&1)
+
+    if [ $? -eq 0 ]; then
+        print_success "Python imports verified after installation"
     else
-        print_status "Creating new systemd service..."
+        print_warning "Some imports failed after installation, but continuing..."
+        echo "$test_imports"
     fi
 
-    print_status "Creating systemd service file..."
-    tee /etc/systemd/system/ictbot.service > /dev/null << 'SERVICEEOF'
+    print_success "Complete project environment setup completed successfully"
+
+EOF
+
+
+    check_status "Complete project environment setup completed" "Project environment setup failed"
+
+# STEP 5: Create systemd Service
+print_step "STEP 5: Creating systemd Service"
+
+if service_exists "ictbot"; then
+    print_warning "ictbot service already exists, updating..."
+    systemctl stop ictbot > /dev/null 2>&1
+else
+    print_status "Creating new systemd service..."
+fi
+
+print_status "Creating systemd service file..."
+tee /etc/systemd/system/ictbot.service > /dev/null << 'SERVICEEOF'
 [Unit]
 Description=ICT Trading Oracle Bot v4.0
 After=network-online.target
@@ -1835,27 +1927,28 @@ WorkingDirectory=/home/ictbot/ict_trading_oracle
 Environment="PATH=/home/ictbot/ict_trading_oracle/venv/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/home/ictbot/ict_trading_oracle"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/home/ictbot/ict_trading_oracle/venv/bin/python main.py
+ExecStart=/home/ictbot/ict_trading_oracle/venv/bin/python run.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=ictbot
 
 [Install]
 WantedBy=multi-user.target
 SERVICEEOF
 
-    check_status "systemd service file created" "Failed to create systemd service file"
+check_status "systemd service file created" "Failed to create systemd service file"
 
-    # Reload systemd daemon
-    print_status "Reloading systemd daemon..."
-    systemctl daemon-reload
-    check_status "systemd daemon reloaded" "Failed to reload systemd daemon"
+# Reload systemd daemon
+print_status "Reloading systemd daemon..."
+systemctl daemon-reload
+check_status "systemd daemon reloaded" "Failed to reload systemd daemon"
 
-    # Enable service for auto-start
-    print_status "Enabling service for auto-start..."
-    systemctl enable ictbot > /dev/null 2>&1
-    check_status "Service enabled for auto-start" "Failed to enable service"
+# Enable service for auto-start
+print_status "Enabling service for auto-start..."
+systemctl enable ictbot > /dev/null 2>&1
+check_status "Service enabled for auto-start" "Failed to enable service"
 
     # STEP 6: Create Management Scripts
     print_step "STEP 6: Creating Advanced Management Scripts"
