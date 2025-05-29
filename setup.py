@@ -1,19 +1,27 @@
 """
-Configuration module for ICT Trading Oracle
+Setup script for ICT Trading Oracle
 """
 
-import sys
+from setuptools import setup, find_packages
 import os
 
-# Add parent directory to path
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# Read requirements
+def read_requirements():
+    req_file = os.path.join(os.path.dirname(__file__), 'requirements_fixed.txt')
+    if os.path.exists(req_file):
+        with open(req_file, 'r') as f:
+            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    return []
 
-try:
-    from .settings import *
-except ImportError as e:
-    print(f"Warning: Could not import settings: {e}")
-    # Default settings
-    ADMIN_IDS = [123456789]
-    BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+setup(
+    name="ict-trading-oracle",
+    version="1.0.0",
+    description="ICT Trading Oracle Bot",
+    packages=find_packages(),
+    install_requires=read_requirements(),
+    python_requires=">=3.8",
+    include_package_data=True,
+    package_data={
+        '': ['*.txt', '*.md', '*.env.example'],
+    },
+)

@@ -99,6 +99,22 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # Backtest results table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS backtest_results (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        test_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        total_signals INTEGER,
+                        wins INTEGER,
+                        losses INTEGER,
+                        win_rate REAL,
+                        total_pnl REAL,
+                        avg_win REAL,
+                        avg_loss REAL,
+                        test_period_days INTEGER DEFAULT 7
+                    )
+                ''')
+                
                 conn.commit()
                 logger.info("Database initialized successfully")
                 
@@ -347,3 +363,31 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error upgrading subscription: {e}")
             return False
+    
+    def save_backtest_result(self, result_data):
+        """Save backtest results to database"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO backtest_results (
+                        total_signals, wins, losses, win_rate, total_pnl,
+                        avg_win, avg_loss, test_period_days
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    result_data['total_signals'],
+                    result_data['wins'],
+                    result_data['losses'],
+                    result_data['win_rate'],
+                    result_data['total_pnl'],
+                    result_data['avg_win'],
+                    result_data['avg_loss'],
+                    result_data.get('test_period_days', 7)
+                ))
+                
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error saving backtest result: {e}")
+            return None
+

@@ -49,7 +49,7 @@ SUBSCRIPTION_PLANS = {
 
 # Admin Configuration - REPLACE WITH YOUR ACTUAL USER IDS
 ADMIN_IDS = [
-    123456789,  # Replace this number with your actual User ID from /start command
+    262182607,  # Replace this number with your actual User ID from /start command
     987654321   # Example admin ID
 ]
 
@@ -77,3 +77,8 @@ CACHE_DURATION = 300  # 5 minutes
 RATE_LIMIT_PER_MINUTE = 60
 MAX_SIGNAL_REQUESTS_PER_HOUR = 100
 SESSION_TIMEOUT = 3600  # 1 hour
+
+# Backtest Configuration
+BACKTEST_DAYS = 7
+SIGNALS_PER_DAY = 10
+BACKTEST_ENABLED = True

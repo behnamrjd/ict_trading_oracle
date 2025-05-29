@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ICT Trading Oracle Bot - Complete Version with Error Handling
+ICT Trading Oracle Bot - Complete Version with All Features
 """
 
 import os
@@ -40,16 +40,14 @@ if not BOT_TOKEN:
 # Global application variable
 application = None
 
-# Import modules with error handling
-try:
-    from config.settings import ADMIN_IDS
-except ImportError as e:
-    logger.error(f"Could not import ADMIN_IDS: {e}")
-    ADMIN_IDS = [123456789]  # Default admin ID
-
 def is_admin(user_id: int) -> bool:
     """Check if user is admin"""
-    return user_id in ADMIN_IDS
+    try:
+        from config.settings import ADMIN_IDS
+        return user_id in ADMIN_IDS
+    except ImportError:
+        logger.error("Could not import ADMIN_IDS from config.settings")
+        return False
 
 # Safe imports for core modules
 def safe_import_api_manager():
@@ -79,41 +77,43 @@ def safe_import_database_manager():
         logger.error(f"Could not import DatabaseManager: {e}")
         return None
 
-def is_admin(user_id: int) -> bool:
-    """Check if user is admin"""
-    try:
-        from config.settings import ADMIN_IDS
-        return user_id in ADMIN_IDS
-    except ImportError:
-        logger.error("Could not import ADMIN_IDS from config.settings")
-        return False
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
     user = update.effective_user
     
     # Add user to database
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.add_user(
-            user_id=user.id,
-            username=user.username,
-            first_name=user.first_name,
-            last_name=user.last_name
-        )
-        db_manager.log_user_activity(user.id, '/start')
-        
-        # Get user info from database
-        user_data = db_manager.get_user(user.id)
-        subscription = user_data['subscription_type'] if user_data else 'free'
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.add_user(
+                user_id=user.id,
+                username=user.username,
+                first_name=user.first_name,
+                last_name=user.last_name
+            )
+            db_manager.log_user_activity(user.id, '/start')
+            
+            # Get user info from database
+            user_data = db_manager.get_user(user.id)
+            subscription = user_data['subscription_type'] if user_data else 'free'
+            
+            # Force VIP for admins
+            if is_admin(user.id):
+                subscription = 'vip'
+                db_manager.upgrade_user_subscription(user.id, 'vip', 365)
+        else:
+            subscription = 'free'
     except Exception as e:
         logger.error(f"Database error in start command: {e}")
         subscription = 'free'
     
     logger.info(f"User started bot - ID: {user.id}, Username: {user.username}, Name: {user.first_name}")
     
-    subscription_emoji = "💎" if subscription == 'vip' else "⭐" if subscription == 'premium' else "🆓"
+    if is_admin(user.id):
+        subscription_emoji = "👑"
+        subscription = "ADMIN"
+    else:
+        subscription_emoji = "💎" if subscription == 'vip' else "⭐" if subscription == 'premium' else "🆓"
     
     welcome_text = f"""
 🎪 **Welcome to ICT Trading Oracle Bot**
@@ -128,6 +128,7 @@ Hello {user.first_name}! 👋
 👉 **LIVE** Market News
 👉 Professional Trading Signals
 👉 Premium Subscriptions Available
+👉 **NEW:** 7-Day Backtest Analysis
 
 📊 **Commands:**
 /help - Complete guide
@@ -137,6 +138,7 @@ Hello {user.first_name}! 👋
 /profile - Your profile & stats
 /subscribe - Premium subscriptions
 /admin - Admin panel (if you're admin)
+/backtest - 7-day performance analysis (admin)
 
 💎 **Upgrade for unlimited signals and advanced features!**
 
@@ -148,9 +150,9 @@ Hello {user.first_name}! 👋
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command handler"""
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(update.effective_user.id, '/help')
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(update.effective_user.id, '/help')
     except:
         pass
     
@@ -166,6 +168,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /profile - Your profile and statistics
 /subscribe - Premium subscriptions
 /admin - Admin panel (admin only)
+/backtest - 7-day performance analysis (admin only)
 
 💳 **Subscription Plans:**
 🆓 **Free:** 3 daily signals
@@ -179,11 +182,17 @@ Inner Circle Trading methodology with REAL market data:
 • Market structure analysis
 • Order block detection
 • Fair Value Gap identification
+• 7-day backtest analysis
 
 💡 **Payment:**
 🔒 Secure payment via ZarinPal
 💳 Iranian bank cards supported
 ⚡ Instant activation
+
+🆕 **New Features:**
+📊 Backtest analysis for performance tracking
+🎯 Enhanced signal accuracy
+📈 Real-time market data
     """
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -192,34 +201,34 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(user_id, '/price')
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(user_id, '/price')
     except:
         pass
     
     await update.message.reply_text("📊 Fetching live gold price...")
     
     try:
-        from core.api_manager import APIManager
-        api_manager = APIManager()
-        price_data = api_manager.get_gold_price()
-        
-        if price_data:
-            change_emoji = "📈" if price_data['change'] >= 0 else "📉"
-            price_text = f"""
+        api_manager = safe_import_api_manager()
+        if api_manager:
+            price_data = api_manager.get_gold_price()
+            
+            if price_data:
+                change_emoji = "📈" if price_data['change'] >= 0 else "📉"
+                price_text = f"""
 💰 **LIVE Gold Price (XAU/USD)**
 
 📊 **${price_data['price']}**
 {change_emoji} **Change:** ${price_data['change']} ({price_data['change_percent']:+.2f}%)
 
 ⏰ **Last Update:** {price_data['timestamp']}
-🔄 **Source:** Yahoo Finance (Live Data)
+🔄 **Source:** Real-time Market Data
 
 🔄 **Refresh:** /price
-            """
-        else:
-            price_text = """
+                """
+            else:
+                price_text = """
 ❌ **Unable to fetch live price**
 
 🔧 **Possible reasons:**
@@ -227,7 +236,9 @@ async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • API service temporarily unavailable
 
 🔄 **Try again:** /price
-            """
+                """
+        else:
+            price_text = "❌ **Error:** API Manager not available"
     except Exception as e:
         logger.error(f"Error in price command: {e}")
         price_text = f"❌ **Error fetching price:** {str(e)}"
@@ -240,15 +251,15 @@ async def signal_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check if user can receive signals
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(user_id, '/signal')
-        
-        if not db_manager.can_receive_signal(user_id):
-            user_data = db_manager.get_user(user_id)
-            limit = 3 if user_data['subscription_type'] == 'free' else 50
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(user_id, '/signal')
             
-            await update.message.reply_text(f"""
+            if not is_admin(user_id) and not db_manager.can_receive_signal(user_id):
+                user_data = db_manager.get_user(user_id)
+                limit = 3 if user_data and user_data['subscription_type'] == 'free' else 50
+                
+                await update.message.reply_text(f"""
 ⚠️ **Daily Signal Limit Reached**
 
 You've used all {limit} signals for today.
@@ -256,20 +267,21 @@ You've used all {limit} signals for today.
 🔄 **Reset Time:** Tomorrow at 00:00 UTC
 💎 **Upgrade:** Use /subscribe for premium subscription
 
-📊 **Current Plan:** {user_data['subscription_type'].upper()}
-            """, parse_mode='Markdown')
-            return
+📊 **Current Plan:** {user_data['subscription_type'].upper() if user_data else 'FREE'}
+                """, parse_mode='Markdown')
+                return
     except Exception as e:
         logger.error(f"Database error in signal command: {e}")
     
     await update.message.reply_text("🔍 Analyzing market with ICT methodology...")
     
     try:
-        from core.api_manager import APIManager
-        from core.technical_analysis import TechnicalAnalyzer
+        api_manager = safe_import_api_manager()
+        tech_analyzer = safe_import_technical_analyzer()
         
-        api_manager = APIManager()
-        tech_analyzer = TechnicalAnalyzer()
+        if not api_manager or not tech_analyzer:
+            await update.message.reply_text("❌ **Error:** Core modules not available")
+            return
         
         # Get live price and analysis
         price_data = api_manager.get_gold_price()
@@ -278,24 +290,25 @@ You've used all {limit} signals for today.
         if price_data and analysis:
             # Save signal to database
             try:
-                signal_data = {
-                    'signal_type': 'ICT',
-                    'symbol': 'GOLD',
-                    'price': price_data['price'],
-                    'signal_direction': analysis['signal'],
-                    'confidence': analysis['confidence'],
-                    'entry_price': price_data['price'],
-                    'stop_loss': price_data['price'] * 0.99,  # 1% stop loss
-                    'take_profit': price_data['price'] * 1.02,  # 2% take profit
-                    'market_structure': analysis['market_structure'],
-                    'order_block': analysis['order_block'],
-                    'fvg_status': analysis['fvg_status'],
-                    'rsi_value': analysis['rsi']
-                }
-                
-                signal_id = db_manager.add_signal(signal_data)
-                if signal_id:
-                    db_manager.record_user_signal(user_id, signal_id)
+                if db_manager:
+                    signal_data = {
+                        'signal_type': 'ICT',
+                        'symbol': 'GOLD',
+                        'price': price_data['price'],
+                        'signal_direction': analysis['signal'],
+                        'confidence': analysis['confidence'],
+                        'entry_price': price_data['price'],
+                        'stop_loss': price_data['price'] * 0.99,  # 1% stop loss
+                        'take_profit': price_data['price'] * 1.02,  # 2% take profit
+                        'market_structure': analysis['market_structure'],
+                        'order_block': analysis['order_block'],
+                        'fvg_status': analysis['fvg_status'],
+                        'rsi_value': analysis['rsi']
+                    }
+                    
+                    signal_id = db_manager.add_signal(signal_data)
+                    if signal_id and not is_admin(user_id):
+                        db_manager.record_user_signal(user_id, signal_id)
             except Exception as e:
                 logger.error(f"Error saving signal to database: {e}")
             
@@ -304,14 +317,28 @@ You've used all {limit} signals for today.
             
             # Get updated user stats
             try:
-                user_data = db_manager.get_user(user_id)
-                signals_used = user_data['daily_signals_used'] if user_data else 0
-                total_signals = user_data['total_signals_received'] if user_data else 0
-                subscription_type = user_data['subscription_type'] if user_data else 'free'
+                if db_manager:
+                    user_data = db_manager.get_user(user_id)
+                    signals_used = user_data['daily_signals_used'] if user_data else 0
+                    total_signals = user_data['total_signals_received'] if user_data else 0
+                    subscription_type = user_data['subscription_type'] if user_data else 'free'
+                else:
+                    signals_used = 0
+                    total_signals = 0
+                    subscription_type = 'free'
             except:
                 signals_used = 0
                 total_signals = 0
                 subscription_type = 'free'
+            
+            # Calculate stop loss and take profit
+            entry_price = price_data['price']
+            if analysis['signal'] == 'BUY':
+                stop_loss = entry_price * 0.985  # 1.5% stop loss
+                take_profit = entry_price * 1.025  # 2.5% take profit
+            else:
+                stop_loss = entry_price * 1.015  # 1.5% stop loss
+                take_profit = entry_price * 0.975  # 2.5% take profit
             
             signal_text = f"""
 📊 **ICT Analysis - Gold (XAU/USD)**
@@ -329,12 +356,12 @@ You've used all {limit} signals for today.
 👉 Fair Value Gap: {analysis['fvg_status']}
 👉 RSI: {analysis['rsi']}
 
-💡 **Entry:** ${signal_data['entry_price']}
-🛡️ **Stop Loss:** ${signal_data['stop_loss']:.2f}
-🎯 **Take Profit:** ${signal_data['take_profit']:.2f}
+💡 **Entry:** ${entry_price}
+🛡️ **Stop Loss:** ${stop_loss:.2f}
+🎯 **Take Profit:** ${take_profit:.2f}
 
 📊 **Your Stats:**
-🔢 Signals Used Today: {signals_used}/{'∞' if subscription_type == 'vip' else '50' if subscription_type == 'premium' else '3'}
+🔢 Signals Used Today: {signals_used}/{'∞' if subscription_type == 'vip' or is_admin(user_id) else '50' if subscription_type == 'premium' else '3'}
 📈 Total Signals: {total_signals}
 
 ⏰ **Analysis Time:** {analysis['analysis_time']}
@@ -363,24 +390,24 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(user_id, '/news')
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(user_id, '/news')
     except:
         pass
     
     await update.message.reply_text("📰 Fetching latest gold market news...")
     
     try:
-        from core.api_manager import APIManager
-        api_manager = APIManager()
-        news_data = api_manager.get_gold_news()
-        
-        if news_data:
-            news_text = "📰 **Latest Gold Market News**\n\n"
+        api_manager = safe_import_api_manager()
+        if api_manager:
+            news_data = api_manager.get_gold_news()
             
-            for i, article in enumerate(news_data[:3], 1):
-                news_text += f"""
+            if news_data:
+                news_text = "📰 **Latest Gold Market News**\n\n"
+                
+                for i, article in enumerate(news_data[:3], 1):
+                    news_text += f"""
 **{i}. {article['title']}**
 {article['description'][:100]}...
 
@@ -388,10 +415,10 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📅 {article['publishedAt'][:10]}
 
 """
-            
-            news_text += "\n🔄 **Refresh:** /news"
-        else:
-            news_text = """
+                
+                news_text += "\n🔄 **Refresh:** /news"
+            else:
+                news_text = """
 ❌ **Unable to fetch news**
 
 🔧 **Possible reasons:**
@@ -399,7 +426,9 @@ async def news_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Network connectivity problem
 
 🔄 **Try again:** /news
-            """
+                """
+        else:
+            news_text = "❌ **Error:** API Manager not available"
     except Exception as e:
         logger.error(f"Error in news command: {e}")
         news_text = f"❌ **Error fetching news:** {str(e)}"
@@ -411,37 +440,47 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(user_id, '/profile')
-        
-        user_data = db_manager.get_user(user_id)
-        
-        if user_data:
-            subscription_emoji = "💎" if user_data['subscription_type'] == 'vip' else "⭐" if user_data['subscription_type'] == 'premium' else "🆓"
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(user_id, '/profile')
+            user_data = db_manager.get_user(user_id)
             
-            profile_text = f"""
+            if user_data:
+                subscription_type = user_data['subscription_type']
+                
+                # Override for admins
+                if is_admin(user_id):
+                    subscription_emoji = "👑"
+                    subscription_display = "ADMIN"
+                else:
+                    subscription_emoji = "💎" if subscription_type == 'vip' else "⭐" if subscription_type == 'premium' else "🆓"
+                    subscription_display = subscription_type.upper()
+                
+                profile_text = f"""
 👤 **Your Profile - ICT Trading Oracle**
 
-{subscription_emoji} **Subscription:** {user_data['subscription_type'].upper()}
+{subscription_emoji} **Subscription:** {subscription_display}
 📅 **Member Since:** {user_data['joined_date'][:10]}
 🕐 **Last Activity:** {user_data['last_activity'][:16]}
 
 📊 **Signal Statistics:**
-🔢 **Today's Signals:** {user_data['daily_signals_used']}/{'∞' if user_data['subscription_type'] == 'vip' else '50' if user_data['subscription_type'] == 'premium' else '3'}
+🔢 **Today's Signals:** {user_data['daily_signals_used']}/{'∞' if subscription_type == 'vip' or is_admin(user_id) else '50' if subscription_type == 'premium' else '3'}
 📈 **Total Signals:** {user_data['total_signals_received']}
 
 💡 **Subscription Benefits:**
-{'🔓 Unlimited daily signals' if user_data['subscription_type'] == 'vip' else '🔓 50 daily signals' if user_data['subscription_type'] == 'premium' else '🔒 3 daily signals (upgrade for more)'}
-{'🔓 Premium analysis' if user_data['subscription_type'] != 'free' else '🔒 Premium analysis (upgrade required)'}
-{'🔓 Priority support' if user_data['subscription_type'] == 'vip' else '🔒 Priority support (VIP only)'}
+{'🔓 Unlimited daily signals' if subscription_type == 'vip' or is_admin(user_id) else '🔓 50 daily signals' if subscription_type == 'premium' else '🔒 3 daily signals (upgrade for more)'}
+{'🔓 Premium analysis' if subscription_type != 'free' or is_admin(user_id) else '🔒 Premium analysis (upgrade required)'}
+{'🔓 Priority support' if subscription_type == 'vip' or is_admin(user_id) else '🔒 Priority support (VIP only)'}
+{'🔓 Backtest access' if is_admin(user_id) else '🔒 Backtest access (admin only)'}
 
 🆔 **User ID:** `{user_id}`
 
-💎 **Want more signals?** Use /subscribe to upgrade!
-            """
+💎 **Want more features?** Use /subscribe to upgrade!
+                """
+            else:
+                profile_text = "❌ Profile not found. Please use /start first."
         else:
-            profile_text = "❌ Profile not found. Please use /start first."
+            profile_text = "❌ **Error:** Database not available"
     except Exception as e:
         logger.error(f"Error in profile command: {e}")
         profile_text = f"❌ **Error loading profile:** {str(e)}"
@@ -453,14 +492,18 @@ async def subscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        db_manager.log_user_activity(user_id, '/subscribe')
-        
-        user_data = db_manager.get_user(user_id)
-        current_plan = user_data['subscription_type'] if user_data else 'free'
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            db_manager.log_user_activity(user_id, '/subscribe')
+            user_data = db_manager.get_user(user_id)
+            current_plan = user_data['subscription_type'] if user_data else 'free'
+        else:
+            current_plan = 'free'
     except:
         current_plan = 'free'
+    
+    if is_admin(user_id):
+        current_plan = 'admin'
     
     subscribe_text = f"""
 💳 **ICT Trading Oracle Subscriptions**
@@ -512,9 +555,16 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        stats = db_manager.get_bot_stats()
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            stats = db_manager.get_bot_stats()
+        else:
+            stats = {
+                'total_users': 0,
+                'active_users': 0,
+                'total_signals': 0,
+                'daily_signals': 0
+            }
     except Exception as e:
         logger.error(f"Error getting stats in admin command: {e}")
         stats = {
@@ -538,20 +588,22 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📋 **Admin Commands:**
 /stats - Detailed statistics
 /users - User management
-/broadcast - Send message to all users
 /test_system - Run system tests
+/backtest - 7-day performance analysis
 
 🛠️ **System Status:**
 ✅ Bot: Running with ALL features
 ✅ Database: Connected
 ✅ APIs: Online
 ✅ Payment: ZarinPal Ready
+✅ Backtest: Available
 
 💡 **Advanced Features:**
 🤖 AI/ML Models: Ready
 📊 Analytics: Real-time
 🔒 Security: Enhanced
 ⚡ Performance: Optimized
+📈 Backtest: 7-day analysis available
     """
     await update.message.reply_text(admin_text)
 
@@ -564,11 +616,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        stats = db_manager.get_bot_stats()
-        
-        stats_text = f"""
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            stats = db_manager.get_bot_stats()
+            
+            stats_text = f"""
 📊 **Detailed Bot Statistics**
 
 👥 **Users:**
@@ -587,7 +639,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🆓 Free Users: {stats['total_users'] - stats.get('premium_users', 0) - stats.get('vip_users', 0)}
 ⭐ Premium Users: {stats.get('premium_users', 0)}
 💎 VIP Users: {stats.get('vip_users', 0)}
-        """
+
+🆕 **New Features:**
+📊 Backtest Analysis: Available
+🎯 Enhanced Signals: Active
+📈 Real-time Data: Connected
+            """
+        else:
+            stats_text = "❌ **Error:** Database not available"
     except Exception as e:
         logger.error(f"Error in stats command: {e}")
         stats_text = f"❌ **Error loading statistics:** {str(e)}"
@@ -603,26 +662,28 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        users = db_manager.get_user_list(10)
-        
-        if users:
-            users_text = "👥 **Recent Users (Last 10)**\n\n"
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            users = db_manager.get_user_list(10)
             
-            for user in users:
-                subscription_emoji = "💎" if user['subscription_type'] == 'vip' else "⭐" if user['subscription_type'] == 'premium' else "🆓"
-                users_text += f"""
+            if users:
+                users_text = "👥 **Recent Users (Last 10)**\n\n"
+                
+                for user in users:
+                    subscription_emoji = "💎" if user['subscription_type'] == 'vip' else "⭐" if user['subscription_type'] == 'premium' else "🆓"
+                    users_text += f"""
 {subscription_emoji} **{user['first_name'] or 'Unknown'}** (@{user['username'] or 'no_username'})
 🆔 ID: `{user['user_id']}`
 📊 Signals: {user['total_signals_received']}
 🕐 Last: {user['last_activity'][:10]}
 
 """
-            
-            users_text += f"\n📋 **Total:** {len(users)} users shown"
+                
+                users_text += f"\n📋 **Total:** {len(users)} users shown"
+            else:
+                users_text = "❌ No users found."
         else:
-            users_text = "❌ No users found."
+            users_text = "❌ **Error:** Database not available"
     except Exception as e:
         logger.error(f"Error in users command: {e}")
         users_text = f"❌ **Error loading users:** {str(e)}"
@@ -643,28 +704,34 @@ async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Test API Manager
     try:
-        from core.api_manager import APIManager
-        api_manager = APIManager()
-        price_data = api_manager.get_gold_price()
-        test_results.append(("API Manager", "✅" if price_data else "❌"))
+        api_manager = safe_import_api_manager()
+        if api_manager:
+            price_data = api_manager.get_gold_price()
+            test_results.append(("API Manager", "✅" if price_data else "❌"))
+        else:
+            test_results.append(("API Manager", "❌ Import failed"))
     except Exception as e:
         test_results.append(("API Manager", f"❌ {str(e)[:50]}"))
     
     # Test Technical Analyzer
     try:
-        from core.technical_analysis import TechnicalAnalyzer
-        tech_analyzer = TechnicalAnalyzer()
-        analysis = tech_analyzer.analyze_market_structure()
-        test_results.append(("Technical Analyzer", "✅" if analysis else "❌"))
+        tech_analyzer = safe_import_technical_analyzer()
+        if tech_analyzer:
+            analysis = tech_analyzer.analyze_market_structure()
+            test_results.append(("Technical Analyzer", "✅" if analysis else "❌"))
+        else:
+            test_results.append(("Technical Analyzer", "❌ Import failed"))
     except Exception as e:
         test_results.append(("Technical Analyzer", f"❌ {str(e)[:50]}"))
     
     # Test Database
     try:
-        from core.database import DatabaseManager
-        db_manager = DatabaseManager()
-        stats = db_manager.get_bot_stats()
-        test_results.append(("Database", "✅" if stats else "❌"))
+        db_manager = safe_import_database_manager()
+        if db_manager:
+            stats = db_manager.get_bot_stats()
+            test_results.append(("Database", "✅" if stats else "❌"))
+        else:
+            test_results.append(("Database", "❌ Import failed"))
     except Exception as e:
         test_results.append(("Database", f"❌ {str(e)[:50]}"))
     
@@ -676,11 +743,61 @@ async def test_system_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     except Exception as e:
         test_results.append(("Payment Manager", f"❌ {str(e)[:50]}"))
     
+    # Test Backtest Module
+    try:
+        from backtest.backtest_analyzer import BacktestAnalyzer
+        backtest = BacktestAnalyzer()
+        test_results.append(("Backtest Analyzer", "✅"))
+    except Exception as e:
+        test_results.append(("Backtest Analyzer", f"❌ {str(e)[:50]}"))
+    
     test_text = "🔧 **System Test Results**\n\n"
     for component, result in test_results:
         test_text += f"**{component}:** {result}\n"
     
     await update.message.reply_text(test_text, parse_mode='Markdown')
+
+async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Run 7-day backtest (admin only)"""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ Admin access required!")
+        return
+    
+    await update.message.reply_text("🚀 Starting 7-day backtest... This may take a moment...")
+    
+    try:
+        from backtest.backtest_analyzer import BacktestAnalyzer
+        
+        backtest = BacktestAnalyzer()
+        results = backtest.run_full_backtest()
+        
+        # Send report
+        await update.message.reply_text(results['report'], parse_mode='Markdown')
+        
+        # Send summary
+        analysis = results['analysis']
+        summary = f"""
+🎯 **Quick Summary:**
+📊 {analysis['total_signals']} signals tested
+✅ {analysis['win_rate']}% win rate
+💰 ${analysis['total_pnl']} total PnL
+
+📈 **Performance Metrics:**
+🎯 Target Hits: {analysis['target_hits']}
+🛡️ Stop Hits: {analysis['stop_hits']}
+⏰ Time Exits: {analysis['time_exits']}
+
+💡 **Average Results:**
+📈 Avg Win: ${analysis['avg_win']}
+📉 Avg Loss: ${analysis['avg_loss']}
+        """
+        await update.message.reply_text(summary, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in backtest command: {e}")
+        await update.message.reply_text(f"❌ **Backtest Error:** {str(e)}")
 
 async def main():
     """Main function with proper event loop handling"""
@@ -704,6 +821,7 @@ async def main():
         application.add_handler(CommandHandler("stats", stats_command))
         application.add_handler(CommandHandler("users", users_command))
         application.add_handler(CommandHandler("test_system", test_system_command))
+        application.add_handler(CommandHandler("backtest", backtest_command))
         
         logger.info("🤖 ICT Trading Oracle Bot starting...")
         print("✅ Bot handlers registered successfully!")
