@@ -819,13 +819,14 @@ setup_project_environment() {
     
     print_status "Installing essential packages..."
     for package in "${essential_packages[@]}"; do
-        print_status "Installing $package..."
-        pip install "$package" >> /var/log/ict_install.log 2>&1
-        if [ $? -eq 0 ]; then
-            print_success "✓ $package"
+        print_status "Installing $package... (pip)"
+        # Show pip install output directly
+        if pip install "$package"; then
+            print_success "✓ $package installed successfully (pip)."
         else
-            print_error "✗ $package"
-            exit 1
+            print_error "✗ Failed to install $package (pip). Check output above."
+            # Decide if you want to exit on critical package failure
+            # exit 1 
         fi
     done
     
@@ -842,22 +843,24 @@ setup_project_environment() {
     
     print_status "Installing data analysis packages..."
     for package in "${analysis_packages[@]}"; do
-        print_status "Installing $package..."
-        if pip install "$package" >> /var/log/ict_install.log 2>&1; then
-            print_success "✓ $package"
+        print_status "Installing $package... (pip)"
+        # Show pip install output directly
+        if pip install "$package"; then
+            print_success "✓ $package installed successfully (pip)."
         else
-            print_warning "✗ $package (optional - may have conflicts)"
+            # For analysis packages, a warning might be enough if they are optional or have complex dependencies
+            print_warning "✗ Failed to install $package (pip). This might be an optional package or have dependency issues. Check output above."
         fi
     done
     
     # Install from requirements if available
     if [ -f "requirements.txt" ]; then
-        print_status "Installing remaining dependencies from requirements..."
-        pip install -r requirements.txt >> "$LOG_FILE" 2>&1
-        if [ $? -eq 0 ]; then
-            print_success "Requirements installed successfully"
+        print_status "Installing remaining dependencies from requirements.txt... (pip)"
+        # Show pip install output directly
+        if pip install -r requirements.txt; then
+            print_success "✓ Requirements from requirements.txt installed successfully (pip)."
         else
-            print_warning "Some requirements failed to install, continuing..."
+            print_warning "✗ Some requirements from requirements.txt failed to install (pip). Check output above."
         fi
     fi
     
@@ -991,9 +994,13 @@ ENVEOF
     
     # Install project in development mode
     if [ -f "setup.py" ]; then
-        print_status "Installing project in development mode..."
-        pip install -e . >> /var/log/ict_install.log 2>&1
-        check_status "Project installed in development mode" "Failed to install project"
+        print_status "Installing project in development mode (-e .)... (pip)"
+        # Show pip install output directly
+        if pip install -e .; then 
+            print_success "✓ Project installed in development mode successfully (pip)."
+        else
+            print_error "✗ Failed to install project in development mode (pip). Check output above."
+        fi
     fi
     
     # Test critical imports
