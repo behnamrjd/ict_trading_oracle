@@ -577,13 +577,20 @@ fresh_installation() {
 install_system_packages() {
     print_step "STEP 1: Installing System Packages"
     
-    print_status "Updating package repositories..."
-    apt update > /dev/null 2>&1
-    check_status "Package repositories updated" "Failed to update repositories"
+    print_status "Updating package lists..."
+    apt update -y > /dev/null 2>&1
+    check_status "Package lists updated successfully." "Failed to update package lists."
     
-    print_status "Upgrading existing packages..."
-    apt upgrade -y > /dev/null 2>&1
-    check_status "System packages upgraded" "Failed to upgrade packages"
+    print_status "Upgrading installed packages... This might take a while."
+    apt upgrade -y
+    check_status "Packages upgraded successfully." "Failed to upgrade packages."
+    
+    print_success "System packages updated and upgraded."
+    
+    # Install software-properties-common for add-apt-repository
+    print_status "Installing software-properties-common..."
+    apt install -y software-properties-common
+    check_status "software-properties-common installed" "Failed to install software-properties-common"
     
     # Add deadsnakes PPA for Python 3.11
     if ! grep -q "deadsnakes" /etc/apt/sources.list.d/*.list 2>/dev/null; then
@@ -595,25 +602,27 @@ install_system_packages() {
     fi
     
     # Install required packages
-    print_status "Installing required system packages..."
-    local total_packages=${#REQUIRED_PACKAGES[@]}
-    local current_package=0
-    
+    print_step "Installing required system packages..."
     for package in "${REQUIRED_PACKAGES[@]}"; do
-        current_package=$((current_package + 1))
-        print_progress $current_package $total_packages "Installing $package"
-        
-        if ! dpkg -l | grep -q "^ii  $package "; then
-            apt install -y "$package" >> "$LOG_FILE" 2>&1
-            if [ $? -ne 0 ]; then
-                print_warning "Failed to install $package, continuing..."
-                log_message "WARNING: Failed to install $package"
+        if dpkg -s "$package" >/dev/null 2>&1; then
+            print_status "Package '$package' is already installed. Skipping."
+        else
+            print_status "Installing package: $package..."
+            # Remove redirection to see apt output
+            apt install -y "$package"
+            # Check status after install command
+            if [ $? -eq 0 ]; then
+                print_success "Package '$package' installed successfully."
+            else
+                print_error "Failed to install package '$package'. Check $LOG_FILE for details."
+                # Optionally, exit here if a critical package fails:
+                # exit 1 
             fi
         fi
     done
+    print_success "All required system packages checked/installed."
     
     echo ""
-    print_success "System packages installation completed"
     
     # Verify critical packages
     print_status "Verifying critical package installations..."
@@ -3723,10 +3732,14 @@ update_management() {
             update_from_github
             ;;
         3)
-            print_status "Updating system packages..."
-            apt update > /dev/null 2>&1
-            apt upgrade -y > /dev/null 2>&1
-            print_success "System packages updated"
+            print_status "Updating system packages (apt update & upgrade)..."
+            print_status "Updating package lists (apt update)..."
+            apt update -y # Keep -y for non-interactive, remove > /dev/null
+            check_status "Package lists updated." "Failed to update package lists."
+            print_status "Upgrading existing packages (apt upgrade)... This may take a while."
+            apt upgrade -y # Keep -y, remove > /dev/null
+            check_status "System packages updated." "Failed to update system packages."
+            print_success "System packages updated successfully."
             ;;
         4)
             print_status "Updating Python dependencies..."
@@ -3740,8 +3753,12 @@ update_management() {
             ;;
         5)
             print_status "Running full system update..."
-            apt update > /dev/null 2>&1
-            apt upgrade -y > /dev/null 2>&1
+            print_status "Updating package lists (apt update)..."
+            apt update -y # Keep -y, remove > /dev/null
+            check_status "Package lists updated for full update." "Failed to update package lists during full update."
+            print_status "Upgrading existing packages (apt upgrade)... This may take a while."
+            apt upgrade -y # Keep -y, remove > /dev/null
+            check_status "System packages upgraded for full update." "Failed to upgrade packages during full update."
             
             if [ -d "$PROJECT_DIR/.git" ]; then
                 cd "$PROJECT_DIR"
