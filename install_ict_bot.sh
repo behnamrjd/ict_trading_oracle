@@ -52,7 +52,7 @@ PROJECT_DIR="/home/ictbot/ict_trading_oracle"
 SERVICE_NAME="ictbot"
 GITHUB_REPO="https://github.com/behnamrjd/ict_trading_oracle.git"
 PYTHON_VERSION="3.11"
-LOG_FILE="/var/log/ict_install.log"
+LOG_FILE="/tmp/ict_install.log"
 BACKUP_DIR="/home/ictbot/backups"
 CONFIG_FILE="/home/ictbot/ict_trading_oracle/.env"
 
@@ -158,8 +158,12 @@ log_message() {
 
 # Initialize logging
 init_logging() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    touch "$LOG_FILE"
+    # Try to create log file, fallback to /tmp if permission denied
+    if ! touch "$LOG_FILE" 2>/dev/null; then
+        LOG_FILE="/tmp/ict_install.log"
+        echo "Warning: Cannot write to /var/log, using /tmp/ict_install.log"
+    fi
+    
     log_message "=== ICT Trading Oracle Installation Started ==="
     log_message "Script Version: $SCRIPT_VERSION"
     log_message "System: $(uname -a)"
@@ -3412,6 +3416,33 @@ except Exception as e:
         passed_tests=$((passed_tests + 1))
     else
         echo -e "  ${RED}✗ FAIL${NC} - Service not enabled"
+    fi
+    
+    # Test 7: Advanced ICT Analysis
+    echo -e "${BLUE}Test 7: Advanced ICT Analysis${NC}"
+    total_tests=$((total_tests + 1))
+    
+    local ict_result=$(sudo -u ictbot bash -c "
+        cd '$PROJECT_DIR'
+        source venv/bin/activate
+        python -c '
+try:
+    from core.technical_analysis import RealICTAnalyzer
+    analyzer = RealICTAnalyzer()
+    result = analyzer.generate_real_ict_signal()
+    print(f\"PASS - Signal: {result[\"signal\"]}, Indicators: {result[\"indicators_count\"]}\")
+except Exception as e:
+    print(f\"FAIL: {e}\")
+        '
+    " 2>/dev/null)
+    
+    if [[ "$ict_result" == *"PASS"* ]]; then
+        echo -e "  ${GREEN}✓ PASS${NC} - Advanced ICT system working"
+        echo -e "    ${DIM}$ict_result${NC}"
+        passed_tests=$((passed_tests + 1))
+    else
+        echo -e "  ${RED}✗ FAIL${NC} - Advanced ICT system error"
+        echo -e "    ${DIM}$ict_result${NC}"
     fi
     
     echo ""
