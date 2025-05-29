@@ -511,7 +511,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔒 Security: Enhanced
 ⚡ Performance: Optimized
     """
-    await update.message.reply_text(admin_text, parse_mode='Markdown')
+    await update.message.reply_text(admin_text)
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show detailed statistics (admin only)"""
