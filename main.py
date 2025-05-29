@@ -9,7 +9,7 @@ import signal
 import sys
 import logging
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 from dotenv import load_dotenv
 
 # Attempt to import logging settings first
@@ -93,6 +93,10 @@ def safe_import_database_manager():
         logger.error(f"Could not import DatabaseManager: {e}")
         return None
 
+# Import new keyboard and handler
+from telegram_bot.keyboards import get_main_menu_keyboard
+from telegram_bot.handlers import button_handler
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler"""
     if not update.message or not update.effective_user:
@@ -131,44 +135,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if is_admin(user.id):
         subscription_emoji = "👑"
-        subscription = "ADMIN"
+        subscription_display_name = "ADMIN"
     else:
-        subscription_emoji = "💎" if subscription == 'vip' else "⭐" if subscription == 'premium' else "🆓"
+        if subscription == 'vip':
+            subscription_emoji = "💎"
+            subscription_display_name = "VIP"
+        elif subscription == 'premium':
+            subscription_emoji = "⭐"
+            subscription_display_name = "PREMIUM"
+        else:
+            subscription_emoji = "🆓"
+            subscription_display_name = "FREE"
     
     welcome_text = f"""
-🎪 **Welcome to ICT Trading Oracle Bot**
+🎪 **به ربات اوراکل خوش آمدید!**
 
-Hello {user.first_name}! 👋
+سلام {user.first_name}! 👋
 
-{subscription_emoji} **Your Subscription:** {subscription.upper()}
+{subscription_emoji} **وضعیت اشتراک شما:** {subscription_display_name}
+🆔 **شناسه کاربری شما:** `{user.id}`
 
-🎯 **Bot Features:**
-👉 **LIVE** Gold Price Data
-👉 **REAL** ICT Technical Analysis  
-👉 **LIVE** Market News
-👉 Professional Trading Signals
-👉 Premium Subscriptions Available
-👉 **NEW:** 7-Day Backtest Analysis
-
-📊 **Commands:**
-/help - Complete guide
-/price - **LIVE** gold price
-/signal - **REAL** ICT analysis
-/news - Latest gold news
-/profile - Your profile & stats
-/subscribe - Premium subscriptions
-/admin - Admin panel (if you're admin)
-/backtest - 7-day performance analysis (admin)
-
-💎 **Upgrade for unlimited signals and advanced features!**
-
-🆔 **Your User ID:** `{user.id}`
+برای استفاده از امکانات ربات، از دکمه‌های زیر استفاده کنید:
     """
     
-    await update.message.reply_text(welcome_text, parse_mode='Markdown')
+    # Send welcome message with the new inline keyboard
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=get_main_menu_keyboard(),
+        parse_mode='Markdown'
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Help command handler"""
+    """Help command handler - now shows the main menu"""
     if not update.message or not update.effective_user:
         logger.warning("Help command received without message or effective_user.")
         return
@@ -179,45 +177,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.warning(f"Failed to log user activity for /help: {e}")
     
-    help_text = """
-🔧 **ICT Trading Oracle Bot Guide**
-
-📋 **Available Commands:**
-/start - Start the bot
-/help - This guide
-/price - **LIVE** gold price from Yahoo Finance
-/signal - **REAL** ICT technical analysis
-/news - Latest gold market news
-/profile - Your profile and statistics
-/subscribe - Premium subscriptions
-/admin - Admin panel (admin only)
-/backtest [days] [trades_per_day] - Performance analysis (admin only, params optional)
-
-💳 **Subscription Plans:**
-🆓 **Free:** 3 daily signals
-⭐ **Premium:** 50 daily signals (49,000 تومان/ماه)
-💎 **VIP:** Unlimited signals
-
-🎪 **About ICT:**
-Inner Circle Trading methodology with REAL market data:
-• Live price feeds from Yahoo Finance
-• Technical analysis with RSI, MACD, Bollinger Bands
-• Market structure analysis
-• Order block detection
-• Fair Value Gap identification
-• 7-day backtest analysis
-
-💡 **Payment:**
-🔒 Secure payment via ZarinPal
-💳 Iranian bank cards supported
-⚡ Instant activation
-
-🆕 **New Features:**
-📊 Backtest analysis for performance tracking
-🎯 Enhanced signal accuracy
-📈 Real-time market data
-    """
-    await update.message.reply_text(help_text, parse_mode='Markdown')
+    help_text = "راهنمای ربات:\n\nاز دکمه‌های زیر برای تعامل با ربات استفاده کنید."
+    
+    await update.message.reply_text(
+        help_text,
+        reply_markup=get_main_menu_keyboard(), # Show the main menu
+        parse_mode='Markdown'
+    )
 
 async def price_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Get live gold price"""
@@ -929,17 +895,50 @@ async def main_bot_logic(application: Application, stop_event: asyncio.Event):
         logger.info("🤖 ICT Trading Oracle Bot preparing to start...")
         print("🚀 Initializing ICT Trading Oracle Bot...")
 
+        # Pass is_admin function to bot_data for handlers to use
+        application.bot_data['is_admin_func'] = is_admin 
+
+        # --- Command Mapping for button_handler ---
+        # Create a map of command strings to function objects
+        command_functions = {
+            "price": price_command,
+            "signal": signal_command,
+            "news": news_command,
+            "profile": profile_command,
+            "subscribe": subscribe_command,
+            "test_system": test_system_command,
+            "backtest": backtest_command, 
+            "help": help_command, 
+            # Admin commands, now accessible from admin panel buttons
+            "admin": admin_command, # This will show the main admin message with /commands
+            "stats": stats_command,
+            "users": users_command,
+            # "start" is handled in button_handler to return to main menu
+        }
+        application.bot_data['command_functions'] = command_functions
+        logger.info("🧩 Command functions mapped and stored in bot_data.")
+        # --- End Command Mapping ---
+
         # Add handlers (moved here to have application instance)
         application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(CommandHandler("price", price_command))
-        application.add_handler(CommandHandler("signal", signal_command))
-        application.add_handler(CommandHandler("news", news_command))
-        application.add_handler(CommandHandler("profile", profile_command))
-        application.add_handler(CommandHandler("subscribe", subscribe_command))
-        application.add_handler(CommandHandler("admin", admin_command))
-        application.add_handler(CommandHandler("stats", stats_command))
-        application.add_handler(CommandHandler("users", users_command))
+        # The help command handler will now also show the menu
+        application.add_handler(CommandHandler("help", help_command)) 
+        
+        # Add the CallbackQueryHandler for button presses
+        application.add_handler(CallbackQueryHandler(button_handler))
+        logger.info("🔗 CallbackQueryHandler for buttons registered.")
+
+        # CommandHandlers for commands that now have buttons are removed to encourage button usage.
+        # application.add_handler(CommandHandler("price", price_command))
+        # application.add_handler(CommandHandler("signal", signal_command))
+        # application.add_handler(CommandHandler("news", news_command))
+        # application.add_handler(CommandHandler("profile", profile_command))
+        # application.add_handler(CommandHandler("subscribe", subscribe_command))
+        
+        # Keep admin-related CommandHandlers
+        application.add_handler(CommandHandler("admin", admin_command)) 
+        application.add_handler(CommandHandler("stats", stats_command)) 
+        application.add_handler(CommandHandler("users", users_command)) 
         application.add_handler(CommandHandler("test_system", test_system_command))
         application.add_handler(CommandHandler("backtest", backtest_command))
         
