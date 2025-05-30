@@ -733,6 +733,12 @@ EOF_PYTHON_SCRIPT_CONTENT
     echo "$CRITICAL_IMPORTS_PY_SCRIPT_CONTENT" > "$TMP_PYTHON_SCRIPT"
     chmod 644 "$TMP_PYTHON_SCRIPT" # Make it readable by ictbot
 
+    echo "DEBUG: Content of TMP_PYTHON_SCRIPT ($TMP_PYTHON_SCRIPT):"
+    cat "$TMP_PYTHON_SCRIPT"
+    echo "DEBUG: End of TMP_PYTHON_SCRIPT content."
+    echo "DEBUG: About to execute sudo -u ictbot bash -c block..."
+    # read -p "DEBUG: Press Enter to continue..." # Uncomment to pause for inspection
+
     # Switch to ictbot user for project setup
     sudo -u ictbot bash -c "
 # ... (exports for PROJECT_DIR, LOG_FILE, PATH, colors, helper functions as before) ...
