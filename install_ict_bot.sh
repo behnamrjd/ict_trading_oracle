@@ -721,14 +721,14 @@ setup_project_environment() {
     # Test critical imports
     print_status_subshell "Testing critical Python imports..."
     # Ensure PYTHONPATH is correct for this check if run by ictbot user
-    PYTHONPATH="$PROJECT_DIR" python -c "
+    PYTHONPATH="$PROJECT_DIR" python <<'END_PYTHON_SCRIPT'
 import sys
-# sys.path.insert(0, '$PROJECT_DIR') # Already set by PYTHONPATH
+# sys.path.insert(0, '\$PROJECT_DIR') # Already set by PYTHONPATH, but good to be aware
 
 try:
     # Test core imports
     from core.api_manager import APIManager
-    # from core.technical_analysis import TechnicalAnalyzer #This was an old name
+    # from core.technical_analysis import TechnicalAnalyzer # This was an old name
     from core.technical_analysis import RealICTAnalyzer as TechnicalAnalyzer
     from core.database import DatabaseManager
     from core.payment_manager import PaymentManager, SubscriptionManager
@@ -748,7 +748,7 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     sys.exit(1)
-"
+END_PYTHON_SCRIPT
     import_test_exit_code=$?
     if [ $import_test_exit_code -eq 0 ]; then
         print_success_subshell "Python imports verified successfully"
