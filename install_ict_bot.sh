@@ -700,10 +700,12 @@ setup_project_environment() {
     check_status "Project directory permissions set" "Failed to set project directory permissions"
 
     # Switch to ictbot user for project setup
-    sudo -u ictbot bash -c '
-    # Pass PROJECT_DIR to the subshell
-    PROJECT_DIR="'"$PROJECT_DIR"'"
-    LOG_FILE="'"$LOG_FILE"'" # Pass LOG_FILE as well for logging within subshell
+    sudo -u ictbot bash -c "\n    # Pass PROJECT_DIR to the subshell
+    PROJECT_DIR=\"'"$PROJECT_DIR"'\"
+    LOG_FILE=\"'"$LOG_FILE"'\" # Pass LOG_FILE as well for logging within subshell
+
+    # Explicitly set a sane PATH for the ictbot user context
+    export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     # Colors for ictbot user session
     RED=\\'\\033[0;31m\\'
@@ -1056,12 +1058,16 @@ except Exception as e:
     
     # Check exit status of the subshell
     local subshell_exit_code=$?
+    # Ensure the main script's check_status uses the subshell's exit code
+    # This is a bit tricky as check_status relies on $? from the *last executed command*
+    # So, we execute a command that will have the subshell's exit code as its own.
+    (exit $subshell_exit_code) 
+
     if [ $subshell_exit_code -ne 0 ]; then
-        print_error "Project environment setup failed within ictbot user context (Exit code: $subshell_exit_code)."
-        # No explicit exit 1 here to allow script to continue to other steps if desired,
-        # but subsequent steps might fail. The check_status below will handle it.
+        print_error "Project environment setup failed within ictbot user context (Exit code: $subshell_exit_code). See $LOG_FILE for details from ictbot context."
+        # The (exit $subshell_exit_code) above will make check_status see this error
     fi
-    check_status "Project environment setup completed" "Project environment setup failed"
+    check_status "Project environment setup completed (ictbot context finished with code: $subshell_exit_code)" "Project environment setup failed (see errors above)"
 }
 
 # Create enhanced systemd service
@@ -3620,8 +3626,12 @@ resource_optimization() {
                     python -c '
 import sqlite3
 conn = sqlite3.connect(\"data/ict_trading.db\")
-conn.execute(\"VACUUM\")
-conn.execute(\"ANALYZE\")
+cursor = conn.cursor()
+print(\"Running VACUUM...\")
+cursor.execute(\"VACUUM\")
+print(\"Running ANALYZE...\")
+cursor.execute(\"ANALYZE\")
+conn.commit()
 conn.close()
                     '
                 " 2>/dev/null
