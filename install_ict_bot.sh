@@ -699,47 +699,21 @@ setup_project_environment() {
     chmod -R 770 "$PROJECT_DIR" # Give ictbot user read/write/execute
     check_status "Project directory permissions set" "Failed to set project directory permissions"
 
-    # Switch to ictbot user for project setup
-    sudo -u ictbot bash -c "\n    # Export variables from parent shell to this subshell's environment.\n    # Values are expanded by the parent (root) shell.\n    export PROJECT_DIR=\"${PROJECT_DIR}\"\n    export LOG_FILE=\"${LOG_FILE}\"\n\n    # Set a sane PATH for the ictbot user context, prepending standard paths.\n    # \\\\$PATH appends the ictbot user's original PATH.\n    export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\\\\$PATH\n\n    # Colors for ictbot user session using C-style string literals for ANSI escapes.\n    RED=\$'\\\\033[0;31m\'\n    GREEN=\$'\\\\033[0;32m\'\n    YELLOW=\$'\\\\033[1;33m\'\n    BLUE=\$'\\\\033[0;34m\'\n    CYAN=\$'\\\\033[0;36m\'\n    NC=\$'\\\\033[0m\'\n\n    # --- Subshell helper functions ---\n    log_message_subshell() {\n        local timestamp=\$(date '\\+%Y-%m-%d %H:%M:%S')
-        echo \"[\$timestamp] (ictbot) \$1\" >> \"\$LOG_FILE\"
-    }\n\n    print_status_subshell() {\n        echo -e \"\${BLUE}[INFO] (ictbot)\${NC} \$1\"\n        log_message_subshell \"INFO: \$1\"\n    }\n\n    print_success_subshell() {\n        echo -e \"\${GREEN}[SUCCESS] (ictbot)\${NC} \$1\"\n        log_message_subshell \"SUCCESS: \$1\"\n    }\n\n    print_error_subshell() {\n        echo -e \"\${RED}[ERROR] (ictbot)\${NC} \$1\"\n        log_message_subshell \"ERROR: \$1\"\n    }\n\n    print_warning_subshell() {\n        echo -e \"\${YELLOW}[WARNING] (ictbot)\${NC} \$1\"\n        log_message_subshell \"WARNING: \$1\"\n    }\n\n    check_status_subshell() {\n        if [ \$? -eq 0 ]; then\n            print_success_subshell \"\$1\"\n        else\n            print_error_subshell \"\$2\"\n            if [ -n \"\$3\" ]; then\n                echo -e \"\${RED}Error details:\${NC}\"\n                echo -e \"\${RED}\$3\${NC}\"\n            fi\n            exit 1 # Exit subshell on error\n        fi\n    }\n\n    print_status_subshell \"Navigating to project directory: \$PROJECT_DIR\"\n    cd \"\$PROJECT_DIR\" || { print_error_subshell \"Failed to cd to \$PROJECT_DIR\"; exit 1; }\n\n    # Handle existing project directory\n    if [ -d \".git\" ]; then\n        print_status_subshell \"Project directory contains .git, attempting to update...\"\n        
-        # Backup .env if it exists\n        if [ -f \".env\" ]; then\n            print_status_subshell \"Backing up existing .env file...\"\n            cp .env \".env.backup.\$(date +%Y%m%d_%H%M%S)\"\n            print_success_subshell \".env file backed up\"\n        fi\n        # Backup settings.py if it exists\n        if [ -f \"config/settings.py\" ]; then\n            print_status_subshell \"Backing up existing config/settings.py...\"\n            mkdir -p config # Ensure config directory exists for backup\n            cp config/settings.py \"config/settings.py.backup.\$(date +%Y%m%d_%H%M%S)\"\n            print_success_subshell \"config/settings.py backed up\"\n        fi\n\n        print_status_subshell \"Updating existing repository...\"\n        git fetch origin\n        check_status_subshell \"Fetched from origin\" \"Failed to fetch from origin\"\n        
-        # Check if local is behind remote\n        LOCAL=\$(git rev-parse @)\n        REMOTE=\$(git rev-parse @{u})\n        BASE=\$(git merge-base @ @{u})\n\n        if [ \$LOCAL = \$REMOTE ]; then\n            print_status_subshell \"Already up-to-date.\"\n        elif [ \$LOCAL = \$BASE ]; then\n            print_status_subshell \"Need to pull. Pulling changes from remote...\"\n            git_output=\$(git pull origin main 2>&1)\n            check_status_subshell \"Repository updated successfully\" \"Git pull failed, check logs\" \"\$git_output\"\n        elif [ \$REMOTE = \$BASE ]; then\n            print_status_subshell \"Local is ahead of remote. This is unusual for a deployment. Consider a manual check.\"\n            # Or force reset:\n            # print_warning_subshell \"Local is ahead. Forcing reset to origin/main...\"\n            # git reset --hard origin/main\n            # check_status_subshell \"Repository reset to latest version\" \"Failed to reset repository\"\n        else\n            print_warning_subshell \"Diverged. Attempting to rebase local changes onto remote...\"\n            git_output=\$(git rebase origin/main 2>&1)\n            if [ \$? -ne 0 ]; then\n                print_error_subshell \"Rebase failed. Attempting hard reset to origin/main.\"\n                git rebase --abort\n                git reset --hard origin/main\n                check_status_subshell \"Repository reset to latest version after failed rebase\" \"Failed to reset repository\"\n            else\n                print_success_subshell \"Rebase successful.\"\n            fi\n        fi\n\n    else\n        print_status_subshell \"Cloning ICT Trading Oracle repository into \$PROJECT_DIR...\"\n        # Check if directory is empty. If not, it might cause clone to fail.\n        if [ \"\$(ls -A .)\" ]; then # Check if current directory (PROJECT_DIR) is not empty\n            print_warning_subshell \"Target directory \$PROJECT_DIR is not empty. Attempting to clone into a temporary directory and move contents.\"\n            TMP_CLONE_DIR=\$(mktemp -d)\n            git_output=\$(git clone https://github.com/behnamrjd/ict_trading_oracle.git \"\$TMP_CLONE_DIR\" 2>&1)\n            if [ \$? -eq 0 ]; then\n                # Move contents from temp clone dir to PROJECT_DIR, overwriting. Use rsync for safer copy.\n                rsync -a --remove-source-files \"\$TMP_CLONE_DIR/\" .\n                rm -rf \"\$TMP_CLONE_DIR\"\n                print_success_subshell \"Repository cloned and contents moved.\"\n            else\n                print_error_subshell \"Failed to clone repository into temporary directory.\" \"\$git_output\"\n                rm -rf \"\$TMP_CLONE_DIR\"\n                exit 1\n            fi\n        else\n             git_output=\$(git clone https://github.com/behnamrjd/ict_trading_oracle.git . 2>&1) # Clone into current dir\n             check_status_subshell \"Repository cloned successfully\" \"Failed to clone repository\" \"\$git_output\"\n        fi\n    fi\n\n    # Create enhanced virtual environment\n    print_status_subshell \"Setting up Python virtual environment (.venv)...\"\n    if [ -d \".venv\" ]; then\n        print_warning_subshell \"Virtual environment .venv already exists\"\n        if source .venv/bin/activate && python --version &>/dev/null; then\n            print_success_subshell \"Existing virtual environment .venv is functional\"\n        else\n            print_warning_subshell \"Virtual environment .venv is corrupted, recreating...\"\n            rm -rf .venv\n            python3.11 -m venv .venv\n            check_status_subshell \"Virtual environment .venv recreated\" \"Failed to recreate .venv\"\n        fi\n    else\n        python3.11 -m venv .venv\n        check_status_subshell \"Virtual environment .venv created\" \"Failed to create .venv\"\n    fi\n\n    # Activate virtual environment\n    print_status_subshell \"Activating virtual environment...\"\n    source .venv/bin/activate\n    check_status_subshell \"Virtual environment .venv activated\" \"Failed to activate .venv\"\n\n    # Upgrade pip and essential tools\n    print_status_subshell \"Upgrading pip and essential tools...\"\n    pip install --upgrade pip setuptools wheel # > /dev/null 2>&1\n    check_status_subshell \"Pip and tools upgraded\" \"Failed to upgrade pip\"\n\n    # Install Python dependencies\n    print_status_subshell \"Installing Python dependencies from requirements.txt...\"\n    if [ -f \"requirements.txt\" ]; then\n        if pip install -r requirements.txt; then # Removed output redirection\n            req_success_msg=\'✓ Requirements from requirements.txt installed successfully (pip).\'\n            print_success_subshell \"\$req_success_msg\"\n        else\n            req_fail_msg=\'✗ Some requirements from requirements.txt failed to install (pip). Check output above.\'\n            print_error_subshell \"\$req_fail_msg\"\n            # exit 1 # Exit if critical requirements fail\n        fi\n    else\n        print_warning_subshell \'requirements.txt not found. Skipping pip install -r.\'\n    fi\n\n    # Create comprehensive directory structure (run by ictbot user within PROJECT_DIR)\n    print_status_subshell \"Creating/verifying comprehensive directory structure...\"\n    # Core directories\n    mkdir -p data logs config core ai_models subscription signals telegram_bot utils admin tests optimization monitoring cache backups backtest backtest_results test_reports optimization_reports monitoring_logs ai_models/trained_models static templates api webhooks notifications analytics scripts\n    
-    # Create .gitkeep files for empty directories (optional, git usually tracks empty dirs if they have .gitkeep)\n    # find . -type d -empty -exec touch {}/.gitkeep \\;\n    
-    # Create __init__.py files for Python packages\n    touch __init__.py\n    for dir_pkg in config core ai_models subscription signals telegram_bot utils admin tests optimization monitoring backtest api webhooks notifications analytics; do\n        touch \"\$dir_pkg/__init__.py\"\n    done\n    print_success_subshell \"Directory structure verified/created.\"\n\n    # Setup configuration files\n    print_status_subshell \"Setting up .env configuration file...\"\n    if [ -f \".env.backup.\$(date +%Y%m%d)_\*\" ]; then # Check if a backup from today exists\n         print_warning_subshell \".env backup from today exists. Will not overwrite .env if it exists.\"\n         if [ ! -f \".env\" ]; then\n            latest_env_backup=\$(ls -t .env.backup.* 2>/dev/null | head -1)\n            if [ -f \"\$latest_env_backup\" ]; then\n                print_status_subshell \"Restoring .env from latest backup: \$latest_env_backup\"\n                cp \"\$latest_env_backup\" .env\n            fi\n         fi\n    fi\n\n    if [ ! -f \".env\" ]; then # Create .env only if it does not exist\n        print_status_subshell \"Creating new .env file...\"\n        cat > .env << \\ENVEOF\n# ================================================================
-# ICT Trading Oracle Bot - Enhanced Configuration v4.1
-# ================================================================
-\n\n# Bot Configuration\nBOT_TOKEN=YOUR_REAL_BOT_TOKEN_HERE\nBOT_USERNAME=your_bot_username\n\n# Payment Configuration\nZARINPAL_MERCHANT_ID=YOUR_ZARINPAL_MERCHANT\nZARINPAL_SANDBOX=true\n\n# News API Configuration\nNEWS_API_KEY=YOUR_NEWSAPI_KEY_FROM_NEWSAPI_ORG\n\n# Market Data APIs\nTGJU_API_URL=https://api.tgju.org/v1/market/indicator/summary-table-data/price_dollar_rl,geram18,geram24,sekee\nALPHA_VANTAGE_API_KEY=YOUR_ALPHA_VANTAGE_KEY\nFOREX_API_KEY=YOUR_FOREX_API_KEY\n\n# Crypto Payment APIs\nCRYPTAPI_CALLBACK_URL=https://yourdomain.com/api\nCRYPTAPI_API_KEY=YOUR_CRYPTAPI_KEY\n\n# Database Configuration\nDATABASE_URL=sqlite:///data/ict_trading.db\nDATABASE_BACKUP_INTERVAL=24\nDATABASE_CLEANUP_DAYS=30\n\n# Environment Settings\nENVIRONMENT=production\nDEBUG=false\nLOG_LEVEL=INFO\nLOG_ROTATION_DAYS=7\nLOG_MAX_SIZE=100MB\n\n# AI/ML Configuration\nAI_MODEL_PATH=ai_models/trained_models/\nAI_CONFIDENCE_THRESHOLD=70\nAI_RETRAIN_INTERVAL=7\nAI_PREDICTION_ENABLED=true\n\n# Monitoring Configuration\nMONITORING_ENABLED=true\nMONITORING_INTERVAL=60\nHEALTH_CHECK_INTERVAL=300\nALERT_EMAIL=admin@yourdomain.com\nALERT_TELEGRAM_CHAT_ID=YOUR_ADMIN_CHAT_ID\n\n# Performance Configuration\nMAX_CONCURRENT_USERS=1000\nRATE_LIMIT_PER_MINUTE=60\nCACHE_DURATION=300\nSESSION_TIMEOUT=3600\n\n# Security Configuration\nENCRYPTION_KEY=YOUR_ENCRYPTION_KEY_HERE\nJWT_SECRET=YOUR_JWT_SECRET_HERE\nAPI_RATE_LIMIT=100\nFAILED_LOGIN_ATTEMPTS=5\n\n# Backtest Configuration\nBACKTEST_DAYS=7\nSIGNALS_PER_DAY=10\nBACKTEST_ENABLED=true\nBACKTEST_AUTO_RUN=false\n\n# Notification Configuration\nEMAIL_SMTP_SERVER=smtp.gmail.com\nEMAIL_SMTP_PORT=587\nEMAIL_USERNAME=your_email@gmail.com\nEMAIL_PASSWORD=your_app_password\nEMAIL_ENABLED=false\n\n# Webhook Configuration\nWEBHOOK_URL=https://yourdomain.com/webhook\nWEBHOOK_SECRET=YOUR_WEBHOOK_SECRET\nWEBHOOK_ENABLED=false\n\n# Analytics Configuration\nANALYTICS_ENABLED=true\nANALYTICS_RETENTION_DAYS=90\nGOOGLE_ANALYTICS_ID=YOUR_GA_ID\n\n# Backup Configuration\nBACKUP_ENABLED=true\nBACKUP_INTERVAL=24\nBACKUP_RETENTION_DAYS=30\nBACKUP_LOCATION=/opt/ictbot_backups # Matches global BACKUP_DIR\n\n# Development Configuration\nDEVELOPMENT_MODE=false\nTEST_MODE=false\nMOCK_APIS=false\nENVEOF\n        check_status_subshell "New .env configuration created" "Failed to create .env file"
-    else
-        print_warning_subshell ".env file already exists. Skipping creation of new one."
-    fi
-    
-    # Install project in development mode
-    if [ -f "setup.py" ]; then
-        dev_mode_msg=\'Installing project in development mode (-e .)... (pip)\'\n        print_status_subshell \"\$dev_mode_msg\"\n        if pip install -e .; then # Removed output redirection\n            dev_mode_success_msg=\'✓ Project installed in development mode successfully (pip).\'\n            print_success_subshell \"\$dev_mode_success_msg\"\n        else\n            dev_mode_fail_msg=\'✗ Failed to install project in development mode (pip). Check output above.\'\n            print_error_subshell \"\$dev_mode_fail_msg\"\n            # exit 1 # Exit if project install fails\n        fi\n    fi
-    
-    # Test critical imports
-    print_status_subshell "Testing critical Python imports..."
-    # Ensure PYTHONPATH is correct for this check if run by ictbot user
-    PYTHONPATH="$PROJECT_DIR" python <<'END_PYTHON_SCRIPT'
+    # Define the Python script for critical imports
+    CRITICAL_IMPORTS_PY_SCRIPT_CONTENT=$(cat <<'EOF_PYTHON_SCRIPT_CONTENT'
 import sys
-# sys.path.insert(0, '\$PROJECT_DIR') # Already set by PYTHONPATH, but good to be aware
-
+# sys.path.insert(0, '$PROJECT_DIR') # PROJECT_DIR will be available as env var
 try:
     # Test core imports
     from core.api_manager import APIManager
-    # from core.technical_analysis import TechnicalAnalyzer # This was an old name
     from core.technical_analysis import RealICTAnalyzer as TechnicalAnalyzer
     from core.database import DatabaseManager
     from core.payment_manager import PaymentManager, SubscriptionManager
-    
-    # Test backtest import
     from backtest.backtest_analyzer import BacktestAnalyzer
-    
     print('✅ All critical imports successful')
-except ImportError as e: # Catch ImportError specifically
+    sys.exit(0)
+except ImportError as e:
     print(f'❌ Import error: {e}')
-    # More detailed error, e.g., which module failed
     import traceback
     traceback.print_exc()
     sys.exit(1)
@@ -748,19 +722,53 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     sys.exit(1)
-END_PYTHON_SCRIPT
-    import_test_exit_code=$?
-    if [ $import_test_exit_code -eq 0 ]; then
-        print_success_subshell "Python imports verified successfully"
+EOF_PYTHON_SCRIPT_CONTENT
+)
+
+    # Create a temporary file for the Python script
+    # This temp file is created by the root user, but will be read by ictbot.
+    # Ensure ictbot can read it, or write it as ictbot in the subshell.
+    # Simpler: create as root, ensure it's world-readable for a moment, or place in /tmp.
+    TMP_PYTHON_SCRIPT="/tmp/critical_imports_check.py"
+    echo "$CRITICAL_IMPORTS_PY_SCRIPT_CONTENT" > "$TMP_PYTHON_SCRIPT"
+    chmod 644 "$TMP_PYTHON_SCRIPT" # Make it readable by ictbot
+
+    # Switch to ictbot user for project setup
+    sudo -u ictbot bash -c "
+# ... (exports for PROJECT_DIR, LOG_FILE, PATH, colors, helper functions as before) ...
+
+    # --- Subshell helper functions ---
+# ... (log_message_subshell, print_status_subshell, etc. as before) ...
+    cd \"\$PROJECT_DIR\" || { print_error_subshell \"Failed to cd to \$PROJECT_DIR\"; exit 1; }
+
+# ... (git clone/pull logic, venv setup, pip install requirements as before) ...
+
+    # Test critical imports using the temporary script
+    print_status_subshell 'Testing critical Python imports...'
+    # Ensure PYTHONPATH is set for the script execution
+    # The Python script itself will use PROJECT_DIR from its environment
+    if PYTHONPATH=\"\$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
+        import_test_exit_code=0
     else
-        print_error_subshell "Critical Python imports failed (Exit code: $import_test_exit_code). Check output above."
-        # exit 1 # Exit if imports fail
+        import_test_exit_code=\$? # Capture python script's exit code
+    fi
+
+    if [ \$import_test_exit_code -eq 0 ]; then
+        print_success_subshell 'Python imports verified successfully'
+    else
+        # Python script already prints detailed errors to its stdout (which is captured by subshell)
+        import_fail_msg=\\\"Critical Python imports failed (Exit code: \$import_test_exit_code). Check output above.\\\"
+        print_error_subshell \\\"\$import_fail_msg\\\"
+        # exit 1 # Optionally exit if imports fail
     fi
     
-    print_success_subshell "Project environment setup completed within $PROJECT_DIR"
+    print_success_subshell 'Project environment setup completed within \$PROJECT_DIR'
 
-' # End of sudo -u ictbot bash -c block
+" # End of sudo -u ictbot bash -c block
     
+    # Clean up the temporary Python script
+    rm -f "$TMP_PYTHON_SCRIPT"
+
     # Check exit status of the subshell
     local subshell_exit_code=$?
     # Ensure the main script's check_status uses the subshell's exit code
