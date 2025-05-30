@@ -806,53 +806,51 @@ EOF_PYTHON_SCRIPT_CONTENT
 
         # Create and activate virtual environment
         print_status_subshell \"Creating Python virtual environment...\"
-        python${PYTHON_VERSION} -m venv venv >> \"\$LOG_FILE_SUBSHELL\" 2>&1
-        check_subshell_status \"Virtual environment created.\" \"Failed to create virtual environment. Check \$LOG_FILE_SUBSHELL\"
-        
-        print_status_subshell \"Activating virtual environment...\"
+        python3 -m venv venv
         source venv/bin/activate
-        check_subshell_status \"Virtual environment activated.\" \"Failed to activate virtual environment.\"
-
-        # Upgrade pip - output to terminal
-        print_status_subshell \"Upgrading pip... (Output will follow)\"
-        pip install --upgrade pip
-        check_subshell_status \"pip upgraded successfully.\" \"Failed to upgrade pip. Check output above.\"
-
-        # Install Python packages from requirements.txt - output to terminal
-        print_status_subshell \"Installing project dependencies from requirements.txt... (Output will follow)\"
-        if [ -f \"requirements.txt\" ]; then
-            pip install -r requirements.txt
-            check_subshell_status \"Project dependencies installed successfully.\" \"Failed to install project dependencies from requirements.txt. Check output above.\"
-        else
-            print_error_subshell \"requirements.txt not found! Skipping dependency installation.\"
-        fi
+        
+        # Upgrade pip and install wheel
+        print_status_subshell \"Upgrading pip and installing wheel...\"
+        pip install --upgrade pip wheel
+        
+        # Install essential packages first
+        print_status_subshell \"Installing essential packages...\"
+        pip install $ESSENTIAL_PACKAGES
+        
+        # Install analysis packages
+        print_status_subshell \"Installing analysis packages...\"
+        pip install $ANALYSIS_PACKAGES
+        
+        # Install remaining requirements
+        print_status_subshell \"Installing remaining requirements...\"
+        pip install -r requirements.txt
         
         # Optional: Install project in development mode if setup.py exists
         if [ -f \"setup.py\" ]; then
-            print_status_subshell \"Installing project in development mode (editable)... (Output will follow)\"
+            print_status_subshell \"Installing project in development mode (editable)...\"
             pip install -e .
             check_subshell_status \"Project installed in development mode.\" \"Failed to install project in development mode. Check output above.\"
         fi
 
         # Test critical imports using the temporary script
-        print_status_subshell 'Testing critical Python imports...'
+        print_status_subshell \"Testing critical Python imports...\"
         # Ensure PYTHONPATH is set for the script execution
-        if PYTHONPATH=\"\\$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
+        if PYTHONPATH=\"$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
             import_test_exit_code=0
         else
-            import_test_exit_code=\\$? # Capture python script's exit code
+            import_test_exit_code=\$? # Capture python script exit code
         fi
 
-        if [ \\$import_test_exit_code -eq 0 ]; then
-            print_success_subshell 'Python imports verified successfully'
+        if [ \$import_test_exit_code -eq 0 ]; then
+            print_success_subshell \"Python imports verified successfully\"
         else
             # Python script already prints detailed errors to its stdout (which is captured by subshell)
-            import_fail_msg="Critical Python imports failed (Exit code: \\$import_test_exit_code). Check output above and \\$LOG_FILE_SUBSHELL."
-            print_error_subshell "\"\\$import_fail_msg\"" # Ensure the message is passed as a single quoted argument
+            import_fail_msg=\"Critical Python imports failed (Exit code: \$import_test_exit_code). Check output above and \$LOG_FILE_SUBSHELL.\"
+            print_error_subshell \"\$import_fail_msg\"
             # exit 1 # Optionally exit if imports fail
         fi
         
-        print_success_subshell 'Project environment setup completed within \\$PROJECT_DIR'
+        print_success_subshell \"Project environment setup completed within \$PROJECT_DIR\"
     "
     # End of sudo -u ictbot bash -c block
     
