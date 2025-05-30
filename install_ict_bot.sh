@@ -806,51 +806,85 @@ EOF_PYTHON_SCRIPT_CONTENT
 
         # Create and activate virtual environment
         print_status_subshell \"Creating Python virtual environment...\"
-        python3 -m venv venv
-        source venv/bin/activate
-        
-        # Upgrade pip and install wheel
-        print_status_subshell \"Upgrading pip and installing wheel...\"
-        pip install --upgrade pip wheel
-        
-        # Install essential packages first
-        print_status_subshell \"Installing essential packages...\"
-        pip install $ESSENTIAL_PACKAGES
-        
-        # Install analysis packages
-        print_status_subshell \"Installing analysis packages...\"
-        pip install $ANALYSIS_PACKAGES
-        
-        # Install remaining requirements
-        print_status_subshell \"Installing remaining requirements...\"
-        pip install -r requirements.txt
-        
-        # Optional: Install project in development mode if setup.py exists
-        if [ -f \"setup.py\" ]; then
-            print_status_subshell \"Installing project in development mode (editable)...\"
-            pip install -e .
-            check_subshell_status \"Project installed in development mode.\" \"Failed to install project in development mode. Check output above.\"
-        fi
+        sudo -u ictbot bash -c "
+            cd \"$PROJECT_DIR\"
+            
+            # Install required system packages first
+            print_status_subshell \"Installing required system packages...\"
+            sudo apt-get update
+            sudo apt-get install -y python3.12-venv python3.12-full python3-pip
+            
+            # Create and activate virtual environment
+            print_status_subshell \"Creating Python virtual environment...\"
+            python3.12 -m venv venv
+            if [ ! -f \"venv/bin/activate\" ]; then
+                print_error_subshell \"Failed to create virtual environment. Please check if python3.12-venv is installed.\"
+                exit 1
+            fi
+            
+            # Activate virtual environment
+            source venv/bin/activate
+            
+            # Upgrade pip and install wheel
+            print_status_subshell \"Upgrading pip and installing wheel...\"
+            python -m pip install --upgrade pip wheel
+            
+            # Install essential packages first
+            print_status_subshell \"Installing essential packages...\"
+            python -m pip install $ESSENTIAL_PACKAGES
+            
+            # Install analysis packages
+            print_status_subshell \"Installing analysis packages...\"
+            python -m pip install $ANALYSIS_PACKAGES
+            
+            # Install remaining requirements
+            print_status_subshell \"Installing remaining requirements...\"
+            python -m pip install -r requirements.txt
+            
+            # Optional: Install project in development mode if setup.py exists
+            if [ -f \"setup.py\" ]; then
+                print_status_subshell \"Installing project in development mode (editable)...\"
+                python -m pip install -e .
+                check_subshell_status \"Project installed in development mode.\" \"Failed to install project in development mode. Check output above.\"
+            fi
 
-        # Test critical imports using the temporary script
-        print_status_subshell \"Testing critical Python imports...\"
-        # Ensure PYTHONPATH is set for the script execution
-        if PYTHONPATH=\"$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
-            import_test_exit_code=0
-        else
-            import_test_exit_code=\$? # Capture python script exit code
-        fi
+            # Test critical imports using the temporary script
+            print_status_subshell \"Testing critical Python imports...\"
+            # Ensure PYTHONPATH is set for the script execution
+            if PYTHONPATH=\"$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
+                import_test_exit_code=0
+            else
+                import_test_exit_code=\$? # Capture python script exit code
+            fi
 
-        if [ \$import_test_exit_code -eq 0 ]; then
-            print_success_subshell \"Python imports verified successfully\"
-        else
-            # Python script already prints detailed errors to its stdout (which is captured by subshell)
-            import_fail_msg=\"Critical Python imports failed (Exit code: \$import_test_exit_code). Check output above and \$LOG_FILE_SUBSHELL.\"
-            print_error_subshell \"\$import_fail_msg\"
-            # exit 1 # Optionally exit if imports fail
-        fi
+            if [ \$import_test_exit_code -eq 0 ]; then
+                print_success_subshell \"Python imports verified successfully\"
+            else
+                # Python script already prints detailed errors to its stdout (which is captured by subshell)
+                import_fail_msg=\"Critical Python imports failed (Exit code: \$import_test_exit_code). Check output above and \$LOG_FILE_SUBSHELL.\"
+                print_error_subshell \"\$import_fail_msg\"
+                # exit 1 # Optionally exit if imports fail
+            fi
+            
+            print_success_subshell \"Project environment setup completed within \$PROJECT_DIR\"
+        "
+        # End of sudo -u ictbot bash -c block
         
-        print_success_subshell \"Project environment setup completed within \$PROJECT_DIR\"
+        # Clean up the temporary Python script
+        rm -f "$TMP_PYTHON_SCRIPT"
+
+        # Check exit status of the subshell
+        local subshell_exit_code=$?
+        # Ensure the main script's check_status uses the subshell's exit code
+        # This is a bit tricky as check_status relies on $? from the *last executed command*
+        # So, we execute a command that will have the subshell's exit code as its own.
+        (exit $subshell_exit_code) 
+
+        if [ $subshell_exit_code -ne 0 ]; then
+            print_error "Project environment setup failed within ictbot user context (Exit code: $subshell_exit_code). See $LOG_FILE for details from ictbot context."
+            # The (exit $subshell_exit_code) above will make check_status see this error
+        fi
+        check_status "Project environment setup completed (ictbot context finished with code: $subshell_exit_code)" "Project environment setup failed (see errors above)"
     "
     # End of sudo -u ictbot bash -c block
     
