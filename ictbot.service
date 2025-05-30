@@ -1,5 +1,5 @@
 [Unit]
-Description=ICT Trading Oracle Bot v4.0
+Description=ICT Trading Oracle Bot v4.1
 After=network-online.target
 Wants=network-online.target
 
@@ -7,11 +7,11 @@ Wants=network-online.target
 Type=simple
 User=ictbot
 Group=ictbot
-WorkingDirectory=/home/ictbot/ict_trading_oracle
-Environment="PATH=/home/ictbot/ict_trading_oracle/venv/bin:/usr/bin:/bin"
-Environment="PYTHONPATH=/home/ictbot/ict_trading_oracle"
+WorkingDirectory=/opt/ict_trading_oracle
+Environment="PATH=/opt/ict_trading_oracle/.venv/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/opt/ict_trading_oracle"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/home/ictbot/ict_trading_oracle/venv/bin/python run.py
+ExecStart=/opt/ict_trading_oracle/.venv/bin/python run.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
