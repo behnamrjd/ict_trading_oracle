@@ -847,13 +847,14 @@ EOF_PYTHON_SCRIPT_CONTENT
             print_success_subshell 'Python imports verified successfully'
         else
             # Python script already prints detailed errors to its stdout (which is captured by subshell)
-            import_fail_msg=\\\\\"Critical Python imports failed (Exit code: \\$import_test_exit_code). Check output above and \\$LOG_FILE_SUBSHELL.\\\\\\"
-            print_error_subshell \\\\\\\"\\$import_fail_msg\\\\\\\"
+            import_fail_msg="Critical Python imports failed (Exit code: \\$import_test_exit_code). Check output above and \\$LOG_FILE_SUBSHELL."
+            print_error_subshell "\"\\$import_fail_msg\"" # Ensure the message is passed as a single quoted argument
             # exit 1 # Optionally exit if imports fail
         fi
         
         print_success_subshell 'Project environment setup completed within \\$PROJECT_DIR'
-    " # End of sudo -u ictbot bash -c block
+    "
+    # End of sudo -u ictbot bash -c block
     
     # Clean up the temporary Python script
     rm -f "$TMP_PYTHON_SCRIPT"
