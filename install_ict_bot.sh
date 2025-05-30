@@ -48,13 +48,13 @@ ROBOT="🤖"
 # Configuration variables
 SCRIPT_VERSION="4.1.0"
 PROJECT_NAME="ICT Trading Oracle Bot"
-PROJECT_DIR="/home/ictbot/ict_trading_oracle"
+PROJECT_DIR="/opt/ict_trading_oracle"
 SERVICE_NAME="ictbot"
 GITHUB_REPO="https://github.com/behnamrjd/ict_trading_oracle.git"
 PYTHON_VERSION="3.11"
 LOG_FILE="/tmp/ict_install.log"
-BACKUP_DIR="/home/ictbot/backups"
-CONFIG_FILE="/home/ictbot/ict_trading_oracle/.env"
+BACKUP_DIR="/opt/ictbot_backups"
+CONFIG_FILE="${PROJECT_DIR}/.env"
 
 # System requirements
 MIN_DISK_SPACE=3145728  # 3GB in KB
@@ -172,11 +172,11 @@ init_logging() {
 # Function to check if installation is complete
 check_installation_complete() {
     local required_files=(
-        "$PROJECT_DIR/main.py"
-        "$PROJECT_DIR/run.py"
-        "$PROJECT_DIR/.env"
-        "$PROJECT_DIR/venv/bin/python"
-        "/etc/systemd/system/$SERVICE_NAME.service"
+        "${PROJECT_DIR}/main.py"
+        "${PROJECT_DIR}/run.py"
+        "${PROJECT_DIR}/.env"
+        "${PROJECT_DIR}/.venv/bin/python"
+        "/etc/systemd/system/${SERVICE_NAME}.service"
     )
     
     for file in "${required_files[@]}"; do
@@ -1233,7 +1233,7 @@ final_verification() {
         "$PROJECT_DIR/main.py"
         "$PROJECT_DIR/run.py"
         "$PROJECT_DIR/.env"
-        "$PROJECT_DIR/venv/bin/python"
+        "$PROJECT_DIR/.venv/bin/python"
         "/etc/systemd/system/$SERVICE_NAME.service"
     )
     
