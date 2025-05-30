@@ -685,215 +685,221 @@ create_ictbot_user() {
 # Enhanced project environment setup
 setup_project_environment() {
     print_step "STEP 3: Setting Up Enhanced Project Environment"
-    
+
+    # Create PROJECT_DIR as root and set ownership
+    print_status "Creating project directory: $PROJECT_DIR"
+    mkdir -p "$PROJECT_DIR"
+    check_status "Project directory created" "Failed to create project directory"
+
+    print_status "Setting ownership of $PROJECT_DIR to ictbot:ictbot"
+    chown -R ictbot:ictbot "$PROJECT_DIR"
+    check_status "Project directory ownership set" "Failed to set project directory ownership"
+
+    print_status "Setting permissions for $PROJECT_DIR"
+    chmod -R 770 "$PROJECT_DIR" # Give ictbot user read/write/execute
+    check_status "Project directory permissions set" "Failed to set project directory permissions"
+
     # Switch to ictbot user for project setup
-    sudo -u ictbot bash << 'EOF'
-    
+    sudo -u ictbot bash -c '
+    # Pass PROJECT_DIR to the subshell
+    PROJECT_DIR="'"$PROJECT_DIR"'"
+    LOG_FILE="'"$LOG_FILE"'" # Pass LOG_FILE as well for logging within subshell
+
     # Colors for ictbot user session
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    NC='\033[0m'
-    
-    print_status() {
-        echo -e "${BLUE}[INFO]${NC} $1"
+    RED=\\'\\033[0;31m\\'
+    GREEN=\\'\\033[0;32m\\'
+    YELLOW=\\'\\033[1;33m\\'
+    BLUE=\\'\\033[0;34m\\'
+    CYAN=\\'\\033[0;36m\\'
+    NC=\\'\\033[0m\\'
+
+    log_message_subshell() {
+        local timestamp=$(date '\\+%Y-%m-%d %H:%M:%S')
+        echo "[$timestamp] (ictbot) $1" >> "$LOG_FILE"
     }
-    
-    print_success() {
-        echo -e "${GREEN}[SUCCESS]${NC} $1"
+
+    print_status_subshell() {
+        echo -e "${BLUE}[INFO] (ictbot)${NC} $1"
+        log_message_subshell "INFO: $1"
     }
-    
-    print_error() {
-        echo -e "${RED}[ERROR]${NC} $1"
+
+    print_success_subshell() {
+        echo -e "${GREEN}[SUCCESS] (ictbot)${NC} $1"
+        log_message_subshell "SUCCESS: $1"
     }
-    
-    print_warning() {
-        echo -e "${YELLOW}[WARNING]${NC} $1"
+
+    print_error_subshell() {
+        echo -e "${RED}[ERROR] (ictbot)${NC} $1"
+        log_message_subshell "ERROR: $1"
     }
-    
-    check_status() {
+
+    print_warning_subshell() {
+        echo -e "${YELLOW}[WARNING] (ictbot)${NC} $1"
+        log_message_subshell "WARNING: $1"
+    }
+
+    check_status_subshell() {
         if [ $? -eq 0 ]; then
-            print_success "$1"
+            print_success_subshell "$1"
         else
-            print_error "$2"
+            print_error_subshell "$2"
             if [ -n "$3" ]; then
                 echo -e "${RED}Error details:${NC}"
                 echo -e "${RED}$3${NC}"
             fi
-            exit 1
+            exit 1 # Exit subshell on error
         fi
     }
-    
-    # Navigate to home directory
-    cd /home/ictbot
-    
+
+    print_status_subshell "Navigating to project directory: $PROJECT_DIR"
+    cd "$PROJECT_DIR" || { print_error_subshell "Failed to cd to $PROJECT_DIR"; exit 1; }
+
     # Handle existing project directory
-    if [ -d "ict_trading_oracle" ]; then
-        print_warning "Project directory already exists"
+    if [ -d ".git" ]; then
+        print_status_subshell "Project directory contains .git, attempting to update..."
         
-        # Create backup of existing installation
-        if [ -f "ict_trading_oracle/.env" ]; then
-            print_status "Backing up existing configuration..."
-            cp ict_trading_oracle/.env backups/.env.backup.$(date +%Y%m%d_%H%M%S)
-            print_success "Configuration backed up"
+        # Backup .env if it exists
+        if [ -f ".env" ]; then
+            print_status_subshell "Backing up existing .env file..."
+            cp .env ".env.backup.$(date +%Y%m%d_%H%M%S)"
+            print_success_subshell ".env file backed up"
         fi
+        # Backup settings.py if it exists
+        if [ -f "config/settings.py" ]; then
+            print_status_subshell "Backing up existing config/settings.py..."
+            mkdir -p config # Ensure config directory exists for backup
+            cp config/settings.py "config/settings.py.backup.$(date +%Y%m%d_%H%M%S)"
+            print_success_subshell "config/settings.py backed up"
+        fi
+
+        print_status_subshell "Updating existing repository..."
+        git fetch origin
+        check_status_subshell "Fetched from origin" "Failed to fetch from origin"
         
-        cd ict_trading_oracle
-        
-        if [ -d ".git" ]; then
-            print_status "Updating existing repository..."
-            
-            # Stash any local changes
-            git stash push -m "Auto stash before update - $(date)"
-            
-            # Fetch latest changes
-            print_status "Fetching latest changes..."
-            git fetch origin
-            
-            # Pull changes
-            print_status "Pulling changes from remote..."
+        # Check if local is behind remote
+        LOCAL=$(git rev-parse @)
+        REMOTE=$(git rev-parse @{u})
+        BASE=$(git merge-base @ @{u})
+
+        if [ $LOCAL = $REMOTE ]; then
+            print_status_subshell "Already up-to-date."
+        elif [ $LOCAL = $BASE ]; then
+            print_status_subshell "Need to pull. Pulling changes from remote..."
             git_output=$(git pull origin main 2>&1)
-            if [ $? -eq 0 ]; then
-                print_success "Repository updated successfully"
-            else
-                print_warning "Git pull failed, attempting reset..."
+            check_status_subshell "Repository updated successfully" "Git pull failed, check logs" "$git_output"
+        elif [ $REMOTE = $BASE ]; then
+            print_status_subshell "Local is ahead of remote. This is unusual for a deployment. Consider a manual check."
+            # Or force reset:
+            # print_warning_subshell "Local is ahead. Forcing reset to origin/main..."
+            # git reset --hard origin/main
+            # check_status_subshell "Repository reset to latest version" "Failed to reset repository"
+        else
+            print_warning_subshell "Diverged. Attempting to rebase local changes onto remote..."
+            git_output=$(git rebase origin/main 2>&1)
+            if [ $? -ne 0 ]; then
+                print_error_subshell "Rebase failed. Attempting hard reset to origin/main."
+                git rebase --abort
                 git reset --hard origin/main
-                check_status "Repository reset to latest version" "Failed to reset repository"
+                check_status_subshell "Repository reset to latest version after failed rebase" "Failed to reset repository"
+            else
+                print_success_subshell "Rebase successful."
+            fi
+        fi
+
+    else
+        print_status_subshell "Cloning ICT Trading Oracle repository into $PROJECT_DIR..."
+        # Check if directory is empty. If not, it might cause clone to fail.
+        if [ \"$(ls -A .)\" ]; then # Check if current directory (PROJECT_DIR) is not empty
+            print_warning_subshell \"Target directory $PROJECT_DIR is not empty. Attempting to clone into a temporary directory and move contents.\"
+            TMP_CLONE_DIR=\$(mktemp -d)
+            git_output=$(git clone https://github.com/behnamrjd/ict_trading_oracle.git \"$TMP_CLONE_DIR\" 2>&1)
+            if [ $? -eq 0 ]; then
+                # Move contents from temp clone dir to PROJECT_DIR, overwriting. Use rsync for safer copy.
+                rsync -a --remove-source-files \"$TMP_CLONE_DIR/\" .
+                rm -rf \"$TMP_CLONE_DIR\"
+                print_success_subshell \"Repository cloned and contents moved.\"
+            else
+                print_error_subshell \"Failed to clone repository into temporary directory.\" \"$git_output\"
+                rm -rf \"$TMP_CLONE_DIR\"
+                exit 1
             fi
         else
-            print_warning "Directory exists but is not a git repository"
-            cd ..
-            mv ict_trading_oracle ict_trading_oracle.backup.$(date +%Y%m%d_%H%M%S)
-            git clone https://github.com/behnamrjd/ict_trading_oracle.git
-            check_status "Repository cloned successfully" "Failed to clone repository"
-            cd ict_trading_oracle
+             git_output=$(git clone https://github.com/behnamrjd/ict_trading_oracle.git . 2>&1) # Clone into current dir
+             check_status_subshell "Repository cloned successfully" "Failed to clone repository" "$git_output"
         fi
-    else
-        print_status "Cloning ICT Trading Oracle repository..."
-        git_output=$(git clone https://github.com/behnamrjd/ict_trading_oracle.git 2>&1)
-        check_status "Repository cloned successfully" "Failed to clone repository" "$git_output"
-        cd ict_trading_oracle
     fi
-    
+
     # Create enhanced virtual environment
-    print_status "Setting up Python virtual environment..."
-    if [ -d "venv" ]; then
-        print_warning "Virtual environment already exists"
-        
-        # Test if virtual environment is working
-        if source venv/bin/activate && python --version &>/dev/null; then
-            print_success "Existing virtual environment is functional"
+    print_status_subshell "Setting up Python virtual environment (.venv)..."
+    if [ -d ".venv" ]; then
+        print_warning_subshell "Virtual environment .venv already exists"
+        if source .venv/bin/activate && python --version &>/dev/null; then
+            print_success_subshell "Existing virtual environment .venv is functional"
         else
-            print_warning "Virtual environment is corrupted, recreating..."
-            rm -rf venv
-            python3.11 -m venv venv
-            check_status "Virtual environment recreated" "Failed to recreate virtual environment"
+            print_warning_subshell "Virtual environment .venv is corrupted, recreating..."
+            rm -rf .venv
+            python3.11 -m venv .venv
+            check_status_subshell "Virtual environment .venv recreated" "Failed to recreate .venv"
         fi
     else
-        python3.11 -m venv venv
-        check_status "Virtual environment created" "Failed to create virtual environment"
+        python3.11 -m venv .venv
+        check_status_subshell "Virtual environment .venv created" "Failed to create .venv"
     fi
-    
+
     # Activate virtual environment
-    source venv/bin/activate
-    check_status "Virtual environment activated" "Failed to activate virtual environment"
-    
+    print_status_subshell "Activating virtual environment..."
+    source .venv/bin/activate
+    check_status_subshell "Virtual environment .venv activated" "Failed to activate .venv"
+
     # Upgrade pip and essential tools
-    print_status "Upgrading pip and essential tools..."
-    pip install --upgrade pip setuptools wheel > /dev/null 2>&1
-    check_status "Pip and tools upgraded" "Failed to upgrade pip"
-    
-    # Install Python dependencies with progress tracking
-    print_status "Installing Python dependencies..."
-    
-    # Install essential packages first
-    essential_packages=(
-        "python-telegram-bot==20.7"
-        "python-dotenv==1.0.0"
-        "requests==2.31.0"
-        "psutil==5.9.5"
-        "nest-asyncio==1.5.8"
-    )
-    
-    print_status "Installing essential packages..."
-    for package in "${essential_packages[@]}"; do
-        print_status "Installing $package... (pip)"
-        # Show pip install output directly
-        if pip install "$package"; then
-            print_success "✓ $package installed successfully (pip)."
-        else
-            print_error "✗ Failed to install $package (pip). Check output above."
-            # Decide if you want to exit on critical package failure
-            # exit 1 
-        fi
-    done
-    
-    # Install data science and analysis packages
-    analysis_packages=(
-        "pandas==2.0.3"
-        "numpy==1.24.3"
-        "yfinance==0.2.18"
-        "ta==0.10.2"
-        "scikit-learn==1.3.0"
-        "matplotlib==3.7.2"
-        "seaborn==0.12.2"
-    )
-    
-    print_status "Installing data analysis packages..."
-    for package in "${analysis_packages[@]}"; do
-        print_status "Installing $package... (pip)"
-        # Show pip install output directly
-        if pip install "$package"; then
-            print_success "✓ $package installed successfully (pip)."
-        else
-            # For analysis packages, a warning might be enough if they are optional or have complex dependencies
-            print_warning "✗ Failed to install $package (pip). This might be an optional package or have dependency issues. Check output above."
-        fi
-    done
-    
-    # Install from requirements if available
+    print_status_subshell "Upgrading pip and essential tools..."
+    pip install --upgrade pip setuptools wheel # > /dev/null 2>&1
+    check_status_subshell "Pip and tools upgraded" "Failed to upgrade pip"
+
+    # Install Python dependencies
+    print_status_subshell "Installing Python dependencies from requirements.txt..."
     if [ -f "requirements.txt" ]; then
-        print_status "Installing remaining dependencies from requirements.txt... (pip)"
-        # Show pip install output directly
-        if pip install -r requirements.txt; then
-            print_success "✓ Requirements from requirements.txt installed successfully (pip)."
+        if pip install -r requirements.txt; then # Removed output redirection
+            print_success_subshell "✓ Requirements from requirements.txt installed successfully (pip)."
         else
-            print_warning "✗ Some requirements from requirements.txt failed to install (pip). Check output above."
+            print_error_subshell "✗ Some requirements from requirements.txt failed to install (pip). Check output above."
+            # exit 1 # Exit if critical requirements fail
         fi
+    else
+        print_warning_subshell "requirements.txt not found. Skipping pip install -r."
     fi
-    
-    # Create comprehensive directory structure
-    print_status "Creating comprehensive directory structure..."
-    
+
+    # Create comprehensive directory structure (run by ictbot user within PROJECT_DIR)
+    print_status_subshell "Creating/verifying comprehensive directory structure..."
     # Core directories
-    mkdir -p {data,logs,config,core,ai_models,subscription,signals,telegram_bot,utils}
-    mkdir -p {admin,tests,optimization,monitoring,cache,backups,backtest,backtest_results}
-    mkdir -p {test_reports,optimization_reports,monitoring_logs,ai_models/trained_models}
-    mkdir -p {static,templates,api,webhooks,notifications,analytics}
+    mkdir -p data logs config core ai_models subscription signals telegram_bot utils admin tests optimization monitoring cache backups backtest backtest_results test_reports optimization_reports monitoring_logs ai_models/trained_models static templates api webhooks notifications analytics scripts
     
-    # Create .gitkeep files for empty directories
-    find . -type d -empty -exec touch {}/.gitkeep \;
+    # Create .gitkeep files for empty directories (optional, git usually tracks empty dirs if they have .gitkeep)
+    # find . -type d -empty -exec touch {}/.gitkeep \\;
     
     # Create __init__.py files for Python packages
     touch __init__.py
-    for dir in config core ai_models subscription signals telegram_bot utils admin tests optimization monitoring backtest; do
-        touch "$dir/__init__.py"
+    for dir_pkg in config core ai_models subscription signals telegram_bot utils admin tests optimization monitoring backtest api webhooks notifications analytics; do
+        touch "$dir_pkg/__init__.py"
     done
-    
-    print_success "Directory structure created successfully"
-    
+    print_success_subshell "Directory structure verified/created."
+
     # Setup configuration files
-    print_status "Setting up configuration files..."
-    
-    # Create enhanced .env file
-    if [ -f ".env" ]; then
-        print_warning ".env file already exists, creating backup..."
-        cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+    print_status_subshell "Setting up .env configuration file..."
+    if [ -f ".env.backup.$(date +%Y%m%d)_*" ]; then # Check if a backup from today exists
+         print_warning_subshell ".env backup from today exists. Will not overwrite .env if it exists."
+         if [ ! -f ".env" ]; then
+            latest_env_backup=$(ls -t .env.backup.* 2>/dev/null | head -1)
+            if [ -f "$latest_env_backup" ]; then
+                print_status_subshell "Restoring .env from latest backup: $latest_env_backup"
+                cp "$latest_env_backup" .env
+            fi
+         fi
     fi
-    
-    cat > .env << 'ENVEOF'
+
+    if [ ! -f ".env" ]; then # Create .env only if it does not exist
+        print_status_subshell "Creating new .env file..."
+        cat > .env << \\ENVEOF
 # ================================================================
 # ICT Trading Oracle Bot - Enhanced Configuration v4.1
 # ================================================================
@@ -982,37 +988,41 @@ GOOGLE_ANALYTICS_ID=YOUR_GA_ID
 BACKUP_ENABLED=true
 BACKUP_INTERVAL=24
 BACKUP_RETENTION_DAYS=30
-BACKUP_LOCATION=/home/ictbot/backups
+BACKUP_LOCATION=/opt/ictbot_backups # Matches global BACKUP_DIR
 
 # Development Configuration
 DEVELOPMENT_MODE=false
 TEST_MODE=false
 MOCK_APIS=false
 ENVEOF
-
-    check_status "Enhanced .env configuration created" "Failed to create .env file"
+        check_status_subshell "New .env configuration created" "Failed to create .env file"
+    else
+        print_warning_subshell ".env file already exists. Skipping creation of new one."
+    fi
     
     # Install project in development mode
     if [ -f "setup.py" ]; then
-        print_status "Installing project in development mode (-e .)... (pip)"
-        # Show pip install output directly
-        if pip install -e .; then 
-            print_success "✓ Project installed in development mode successfully (pip)."
+        print_status_subshell "Installing project in development mode (-e .)... (pip)"
+        if pip install -e .; then # Removed output redirection
+            print_success_subshell "✓ Project installed in development mode successfully (pip)."
         else
-            print_error "✗ Failed to install project in development mode (pip). Check output above."
+            print_error_subshell "✗ Failed to install project in development mode (pip). Check output above."
+            # exit 1 # Exit if project install fails
         fi
     fi
     
     # Test critical imports
-    print_status "Testing critical Python imports..."
-    python -c "
+    print_status_subshell "Testing critical Python imports..."
+    # Ensure PYTHONPATH is correct for this check if run by ictbot user
+    PYTHONPATH="$PROJECT_DIR" python -c "
 import sys
-sys.path.insert(0, '/home/ictbot/ict_trading_oracle')
+# sys.path.insert(0, '$PROJECT_DIR') # Already set by PYTHONPATH
 
 try:
     # Test core imports
     from core.api_manager import APIManager
-    from core.technical_analysis import TechnicalAnalyzer
+    # from core.technical_analysis import TechnicalAnalyzer #This was an old name
+    from core.technical_analysis import RealICTAnalyzer as TechnicalAnalyzer
     from core.database import DatabaseManager
     from core.payment_manager import PaymentManager, SubscriptionManager
     
@@ -1020,22 +1030,38 @@ try:
     from backtest.backtest_analyzer import BacktestAnalyzer
     
     print('✅ All critical imports successful')
-except Exception as e:
+except ImportError as e: # Catch ImportError specifically
     print(f'❌ Import error: {e}')
+    # More detailed error, e.g., which module failed
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
-" 2>&1
-
-    if [ $? -eq 0 ]; then
-        print_success "Python imports verified successfully"
+except Exception as e:
+    print(f'❌ General error during import test: {e}')
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+"
+    import_test_exit_code=$?
+    if [ $import_test_exit_code -eq 0 ]; then
+        print_success_subshell "Python imports verified successfully"
     else
-        print_warning "Some imports failed, but continuing with installation..."
+        print_error_subshell "Critical Python imports failed (Exit code: $import_test_exit_code). Check output above."
+        # exit 1 # Exit if imports fail
     fi
     
-    print_success "Enhanced project environment setup completed"
+    print_success_subshell "Project environment setup completed within $PROJECT_DIR"
 
-EOF
-
-    check_status "Enhanced project environment setup completed" "Project environment setup failed"
+' # End of sudo -u ictbot bash -c block
+    
+    # Check exit status of the subshell
+    local subshell_exit_code=$?
+    if [ $subshell_exit_code -ne 0 ]; then
+        print_error "Project environment setup failed within ictbot user context (Exit code: $subshell_exit_code)."
+        # No explicit exit 1 here to allow script to continue to other steps if desired,
+        # but subsequent steps might fail. The check_status below will handle it.
+    fi
+    check_status "Project environment setup completed" "Project environment setup failed"
 }
 
 # Create enhanced systemd service
