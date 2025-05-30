@@ -3921,6 +3921,171 @@ except Exception as e:
     read -p "Press Enter to continue..."
 }
 
+# Function to create .env file
+create_env_file() {
+    print_step "Creating .env file..."
+    
+    # Create .env file with proper permissions
+    cat > "${PROJECT_DIR}/.env" << EOL
+# Bot Configuration
+BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+NEWS_API_KEY=YOUR_NEWS_API_KEY
+
+# Payment Configuration
+ZARINPAL_MERCHANT_ID=YOUR_ZARINPAL_MERCHANT
+ZARINPAL_SANDBOX=true
+PAYMENT_CALLBACK_DOMAIN=yourdomain.com
+CRYPTAPI_CALLBACK_URL=https://yourdomain.com/api
+
+# AI Configuration
+AI_CONFIDENCE_THRESHOLD=70
+AI_RETRAIN_INTERVAL=7
+
+# Monitoring Configuration
+MONITORING_ENABLED=true
+MONITORING_INTERVAL=60
+ALERT_EMAIL=admin@yourdomain.com
+
+# Logging Configuration
+LOG_LEVEL=INFO
+EOL
+
+    # Set proper permissions
+    chown ictbot:ictbot "${PROJECT_DIR}/.env"
+    chmod 600 "${PROJECT_DIR}/.env"
+    
+    if [ -f "${PROJECT_DIR}/.env" ]; then
+        print_success "Created .env file"
+    else
+        print_error "Failed to create .env file"
+        return 1
+    fi
+}
+
+# Function to setup virtual environment
+setup_virtual_env() {
+    print_step "Setting up Python virtual environment..."
+    
+    # Remove existing venv if it exists
+    if [ -d "${PROJECT_DIR}/.venv" ]; then
+        rm -rf "${PROJECT_DIR}/.venv"
+    fi
+    
+    # Create new virtual environment
+    python3.11 -m venv "${PROJECT_DIR}/.venv"
+    if [ $? -ne 0 ]; then
+        print_error "Failed to create virtual environment"
+        return 1
+    fi
+    
+    # Activate virtual environment and install requirements
+    source "${PROJECT_DIR}/.venv/bin/activate"
+    if [ $? -ne 0 ]; then
+        print_error "Failed to activate virtual environment"
+        return 1
+    fi
+    
+    # Upgrade pip
+    pip install --upgrade pip
+    
+    # Install requirements
+    pip install -r "${PROJECT_DIR}/requirements.txt"
+    if [ $? -ne 0 ]; then
+        print_error "Failed to install requirements"
+        return 1
+    fi
+    
+    print_success "Virtual environment setup completed"
+}
+
+# Modify the main installation function to include these new steps
+install_ict_bot() {
+    print_header "Installing ICT Trading Oracle Bot"
+    
+    # Check system requirements
+    check_system_requirements
+    
+    # Create project directory
+    print_step "Creating project directory..."
+    mkdir -p "$PROJECT_DIR"
+    check_status "Created project directory" "Failed to create project directory"
+    
+    # Clone repository
+    print_step "Cloning repository..."
+    git clone "$GITHUB_REPO" "$PROJECT_DIR"
+    check_status "Cloned repository" "Failed to clone repository"
+    
+    # Create ictbot user if it doesn't exist
+    if ! user_exists "ictbot"; then
+        print_step "Creating ictbot user..."
+        useradd -m -s /bin/bash ictbot
+        check_status "Created ictbot user" "Failed to create ictbot user"
+    fi
+    
+    # Set proper ownership and permissions
+    print_step "Setting proper permissions..."
+    chown -R ictbot:ictbot "$PROJECT_DIR"
+    chmod -R 755 "$PROJECT_DIR"
+    # Ensure specific directories have proper permissions
+    chmod 775 "$PROJECT_DIR/logs"
+    chmod 775 "$PROJECT_DIR/data"
+    chmod 775 "$PROJECT_DIR/cache"
+    chmod 775 "$PROJECT_DIR/backtest_results"
+    check_status "Set permissions" "Failed to set permissions"
+    
+    # Create .env file
+    create_env_file
+    check_status "Created .env file" "Failed to create .env file"
+    
+    # Setup virtual environment
+    setup_virtual_env
+    check_status "Setup virtual environment" "Failed to setup virtual environment"
+    
+    # Create service file
+    print_step "Creating systemd service..."
+    cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOL
+[Unit]
+Description=ICT Trading Oracle Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ictbot
+Group=ictbot
+WorkingDirectory=${PROJECT_DIR}
+Environment=PATH=${PROJECT_DIR}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=${PROJECT_DIR}/.venv/bin/python ${PROJECT_DIR}/run.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOL
+    
+    # Reload systemd and enable service
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+    check_status "Created and enabled service" "Failed to create service"
+    
+    # Start the service
+    print_step "Starting service..."
+    systemctl start "$SERVICE_NAME"
+    check_status "Started service" "Failed to start service"
+    
+    print_success "Installation completed successfully!"
+    echo ""
+    echo -e "${GREEN}${BOLD}ICT Trading Oracle Bot has been installed successfully!${NC}"
+    echo -e "${BLUE}The bot is now running as a system service.${NC}"
+    echo ""
+    echo -e "${YELLOW}Important:${NC}"
+    echo -e "1. Edit ${PROJECT_DIR}/.env to configure your bot settings"
+    echo -e "2. Check the service status with: systemctl status ${SERVICE_NAME}"
+    echo -e "3. View logs with: journalctl -u ${SERVICE_NAME} -f"
+    echo ""
+    
+    read -p "Press Enter to continue..."
+}
+
 # Main script execution
 main() {
     # Initialize logging
