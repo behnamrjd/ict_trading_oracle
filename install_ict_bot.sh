@@ -741,36 +741,119 @@ EOF_PYTHON_SCRIPT_CONTENT
 
     # Switch to ictbot user for project setup
     sudo -u ictbot bash -c "
-# ... (exports for PROJECT_DIR, LOG_FILE, PATH, colors, helper functions as before) ...
+        # Export necessary variables for the subshell
+        export PROJECT_DIR=\"$PROJECT_DIR\"
+        export LOG_FILE_SUBSHELL=\"/tmp/ict_install_ictbot_user.log\" # Separate log for ictbot user
+        export PATH=\"/home/ictbot/.local/bin:\$PATH\" # Ensure .local/bin is in PATH for pip installed executables
 
-    # --- Subshell helper functions ---
-# ... (log_message_subshell, print_status_subshell, etc. as before) ...
-    cd \"\$PROJECT_DIR\" || { print_error_subshell \"Failed to cd to \$PROJECT_DIR\"; exit 1; }
+        # Color codes for subshell
+        RED_SUB='\\033[0;31m'
+        GREEN_SUB='\\033[0;32m'
+        YELLOW_SUB='\\033[1;33m'
+        BLUE_SUB='\\033[0;34m'
+        NC_SUB='\\033[0m' # No Color
+        CHECK_MARK_SUB=\"✅\"
+        CROSS_MARK_SUB=\"❌\"
 
-# ... (git clone/pull logic, venv setup, pip install requirements as before) ...
+        # --- Subshell helper functions ---
+        log_message_subshell() {
+            local timestamp=\$(date '+%Y-%m-%d %H:%M:%S')
+            echo \"[\$timestamp] \$1\" >> \"\$LOG_FILE_SUBSHELL\"
+        }
 
-    # Test critical imports using the temporary script
-    print_status_subshell 'Testing critical Python imports...'
-    # Ensure PYTHONPATH is set for the script execution
-    # The Python script itself will use PROJECT_DIR from its environment
-    if PYTHONPATH=\"\$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
-        import_test_exit_code=0
-    else
-        import_test_exit_code=\$? # Capture python script's exit code
-    fi
+        print_status_subshell() {
+            echo -e \"\${BLUE_SUB}[ICTBOT_INFO]\${NC_SUB} \$1\"
+            log_message_subshell \"INFO: \$1\"
+        }
 
-    if [ \$import_test_exit_code -eq 0 ]; then
-        print_success_subshell 'Python imports verified successfully'
-    else
-        # Python script already prints detailed errors to its stdout (which is captured by subshell)
-        import_fail_msg=\\\"Critical Python imports failed (Exit code: \$import_test_exit_code). Check output above.\\\"
-        print_error_subshell \\\"\$import_fail_msg\\\"
-        # exit 1 # Optionally exit if imports fail
-    fi
-    
-    print_success_subshell 'Project environment setup completed within \$PROJECT_DIR'
+        print_success_subshell() {
+            echo -e \"\${GREEN_SUB}[ICTBOT_SUCCESS]\${NC_SUB} \${CHECK_MARK_SUB} \$1\"
+            log_message_subshell \"SUCCESS: \$1\"
+        }
 
-" # End of sudo -u ictbot bash -c block
+        print_error_subshell() {
+            echo -e \"\${RED_SUB}[ICTBOT_ERROR]\${NC_SUB} \${CROSS_MARK_SUB} \$1\"
+            log_message_subshell \"ERROR: \$1\"
+        }
+        
+        check_subshell_status() {
+            if [ \$? -eq 0 ]; then
+                print_success_subshell \"\$1\"
+            else
+                print_error_subshell \"\$2\"
+                # exit 1 # Optionally exit immediately on sub-error
+            fi
+        }
+        # --- End Subshell helper functions ---
+
+        # Initialize subshell log
+        # Using echo to create/truncate, then append
+        echo \"=== ICT Trading Oracle - ictbot User Setup Log ===\" > \"\$LOG_FILE_SUBSHELL\"
+        log_message_subshell \"Starting setup within ictbot user context for \$PROJECT_DIR\"
+
+        cd \"\$PROJECT_DIR\" || { print_error_subshell \"Failed to cd to \$PROJECT_DIR\"; exit 1; }
+
+        # Clone or pull project from GitHub
+        if [ -d \".git\" ]; then
+            print_status_subshell \"Repository exists, pulling latest changes...\"
+            git pull origin main >> \"\$LOG_FILE_SUBSHELL\" 2>&1
+            check_subshell_status \"Repository updated.\" \"Failed to pull from repository. Check \$LOG_FILE_SUBSHELL\"
+        else
+            print_status_subshell \"Cloning repository from GitHub...\"
+            git clone ${GITHUB_REPO} . >> \"\$LOG_FILE_SUBSHELL\" 2>&1 # Clone into current dir
+            check_subshell_status \"Repository cloned.\" \"Failed to clone repository. Check \$LOG_FILE_SUBSHELL\"
+        fi
+
+        # Create and activate virtual environment
+        print_status_subshell \"Creating Python virtual environment...\"
+        python${PYTHON_VERSION} -m venv venv >> \"\$LOG_FILE_SUBSHELL\" 2>&1
+        check_subshell_status \"Virtual environment created.\" \"Failed to create virtual environment. Check \$LOG_FILE_SUBSHELL\"
+        
+        print_status_subshell \"Activating virtual environment...\"
+        source venv/bin/activate
+        check_subshell_status \"Virtual environment activated.\" \"Failed to activate virtual environment.\"
+
+        # Upgrade pip - output to terminal
+        print_status_subshell \"Upgrading pip... (Output will follow)\"
+        pip install --upgrade pip
+        check_subshell_status \"pip upgraded successfully.\" \"Failed to upgrade pip. Check output above.\"
+
+        # Install Python packages from requirements.txt - output to terminal
+        print_status_subshell \"Installing project dependencies from requirements.txt... (Output will follow)\"
+        if [ -f \"requirements.txt\" ]; then
+            pip install -r requirements.txt
+            check_subshell_status \"Project dependencies installed successfully.\" \"Failed to install project dependencies from requirements.txt. Check output above.\"
+        else
+            print_error_subshell \"requirements.txt not found! Skipping dependency installation.\"
+        fi
+        
+        # Optional: Install project in development mode if setup.py exists
+        if [ -f \"setup.py\" ]; then
+            print_status_subshell \"Installing project in development mode (editable)... (Output will follow)\"
+            pip install -e .
+            check_subshell_status \"Project installed in development mode.\" \"Failed to install project in development mode. Check output above.\"
+        fi
+
+        # Test critical imports using the temporary script
+        print_status_subshell 'Testing critical Python imports...'
+        # Ensure PYTHONPATH is set for the script execution
+        if PYTHONPATH=\"\\$PROJECT_DIR\" python \"$TMP_PYTHON_SCRIPT\"; then
+            import_test_exit_code=0
+        else
+            import_test_exit_code=\\$? # Capture python script's exit code
+        fi
+
+        if [ \\$import_test_exit_code -eq 0 ]; then
+            print_success_subshell 'Python imports verified successfully'
+        else
+            # Python script already prints detailed errors to its stdout (which is captured by subshell)
+            import_fail_msg=\\\\\"Critical Python imports failed (Exit code: \\$import_test_exit_code). Check output above and \\$LOG_FILE_SUBSHELL.\\\\\\"
+            print_error_subshell \\\\\\\"\\$import_fail_msg\\\\\\\"
+            # exit 1 # Optionally exit if imports fail
+        fi
+        
+        print_success_subshell 'Project environment setup completed within \\$PROJECT_DIR'
+    " # End of sudo -u ictbot bash -c block
     
     # Clean up the temporary Python script
     rm -f "$TMP_PYTHON_SCRIPT"
@@ -3142,96 +3225,6 @@ except Exception as e:
     print(f\"FAIL: {e}\")
         '
     " 2>/dev/null)
-    
-    if [[ "$ta_result" == "PASS" ]]; then
-        echo -e "  ${GREEN}✓ PASS${NC} - Technical analysis working"
-        passed_tests=$((passed_tests + 1))
-    else
-        echo -e "  ${RED}✗ FAIL${NC} - Technical analysis error: $ta_result"
-    fi
-    
-    # Test 5: Backtest Module
-    echo -e "${BLUE}Test 5: Backtest Module${NC}"
-    total_tests=$((total_tests + 1))
-    
-    local backtest_result=$(sudo -u ictbot bash -c "
-        cd '$PROJECT_DIR'
-        source venv/bin/activate
-        python -c '
-try:
-    from backtest.backtest_analyzer import BacktestAnalyzer
-    backtest = BacktestAnalyzer()
-    print(\"PASS\")
-except Exception as e:
-    print(f\"FAIL: {e}\")
-        '
-    " 2>/dev/null)
-    
-    if [[ "$backtest_result" == "PASS" ]]; then
-        echo -e "  ${GREEN}✓ PASS${NC} - Backtest module available"
-        passed_tests=$((passed_tests + 1))
-    else
-        echo -e "  ${RED}✗ FAIL${NC} - Backtest error: $backtest_result"
-    fi
-    
-    # Test 6: Service Configuration
-    echo -e "${BLUE}Test 6: Service Configuration${NC}"
-    total_tests=$((total_tests + 1))
-    
-    if systemctl is-enabled "$SERVICE_NAME" &>/dev/null; then
-        echo -e "  ${GREEN}✓ PASS${NC} - Service is properly configured"
-        passed_tests=$((passed_tests + 1))
-    else
-        echo -e "  ${RED}✗ FAIL${NC} - Service not enabled"
-    fi
-    
-    # Test 7: Advanced ICT Analysis
-    echo -e "${BLUE}Test 7: Advanced ICT Analysis${NC}"
-    total_tests=$((total_tests + 1))
-    
-    local ict_result=$(sudo -u ictbot bash -c "
-        cd '$PROJECT_DIR'
-        source venv/bin/activate
-        python -c '
-try:
-    from core.technical_analysis import RealICTAnalyzer
-    analyzer = RealICTAnalyzer()
-    result = analyzer.generate_real_ict_signal()
-    print(f\"PASS - Signal: {result[\"signal\"]}, Indicators: {result[\"indicators_count\"]}\")
-except Exception as e:
-    print(f\"FAIL: {e}\")
-        '
-    " 2>/dev/null)
-    
-    if [[ "$ict_result" == *"PASS"* ]]; then
-        echo -e "  ${GREEN}✓ PASS${NC} - Advanced ICT system working"
-        echo -e "    ${DIM}$ict_result${NC}"
-        passed_tests=$((passed_tests + 1))
-    else
-        echo -e "  ${RED}✗ FAIL${NC} - Advanced ICT system error"
-        echo -e "    ${DIM}$ict_result${NC}"
-    fi
-    
-    echo ""
-    
-    # Test summary
-    echo -e "${CYAN}${BOLD}📊 Test Summary:${NC}"
-    echo "  Tests Run: $total_tests"
-    echo "  Passed: $passed_tests"
-    echo "  Failed: $((total_tests - passed_tests))"
-    
-    local success_rate=$((passed_tests * 100 / total_tests))
-    echo "  Success Rate: ${success_rate}%"
-    
-    if [ $success_rate -eq 100 ]; then
-        echo -e "  ${GREEN}${BOLD}🟢 ALL TESTS PASSED${NC}"
-    elif [ $success_rate -ge 80 ]; then
-        echo -e "  ${YELLOW}${BOLD}🟡 MOSTLY PASSING${NC}"
-    else
-        echo -e "  ${RED}${BOLD}🔴 MULTIPLE FAILURES${NC}"
-    fi
-    
-    read -p "Press Enter to continue..."
 }
 
 # Network diagnostics
